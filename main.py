@@ -671,8 +671,8 @@ if __name__ == "__main__":
     # whichever default models forecasting-tools picks based on your env vars;
     # uncomment and edit to pin specific models.
     template_bot = SummerTemplateBot2026(
-        research_reports_per_question=1,
-        predictions_per_research_report=5,
+        research_reports_per_question=2,
+predictions_per_research_report=3,
         use_research_summary_to_forecast=False,
         publish_reports_to_metaculus=publish_to_metaculus,
         folder_to_save_reports_to=None,
