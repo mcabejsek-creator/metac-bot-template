@@ -142,12 +142,16 @@ class SummerTemplateBot2026(ForecastBot):
 The superforecaster will give you a question they intend to forecast on.
 
 Produce a concise but rigorous research report. Focus on:
-- the most recent and reliable information relevant to the resolution criteria,
-- historical base rates and comparable past cases when useful,
-- the strongest evidence supporting different possible outcomes,
-- important contrary evidence that could make the obvious conclusion wrong,
-- trends, expert expectations, polls, markets, or quantitative data when available,
-- uncertainty, missing information, and possible surprises.
+- the most recent and reliable information directly relevant to the resolution criteria,
+- current quantitative data and the strongest available primary or authoritative sources,
+- historical base rates and comparable past cases,
+- evidence supporting the most likely outcome,
+- strong contrary evidence and reasons the apparent consensus could be wrong,
+- information that would materially distinguish between possible outcomes,
+- uncertainty, missing information, and plausible surprises.
+
+Actively seek diverse evidence rather than repeating several articles that report the same underlying facts.
+Prefer directly relevant sources over loosely related background material.
 
 Prioritize facts that can materially change the forecast. Do not merely summarize general background.
 Do not produce the final forecast yourself.
