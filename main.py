@@ -152,6 +152,16 @@ Produce a concise but rigorous research report. Focus on:
 
 Actively seek diverse evidence rather than repeating several articles that report the same underlying facts.
 Prefer directly relevant sources over loosely related background material.
+When reporting is politically contentious or highly framed, distinguish carefully between:
+- direct primary evidence,
+- media interpretation or framing,
+- rhetorical statements, threats, or speculation,
+- concrete administrative or legal actions,
+- and actions that are actually feasible before the resolution deadline.
+
+Do not infer intent or plans from headlines alone.
+Prefer primary documents, court filings, official statements, and independently corroborated facts over commentary or partisan framing.
+When possible, compare reporting from sources with different editorial perspectives.
 
 Prioritize facts that can materially change the forecast. Do not merely summarize general background.
 Do not produce the final forecast yourself.
