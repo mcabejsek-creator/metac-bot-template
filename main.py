@@ -366,8 +366,7 @@ Do not produce the final forecast yourself.
             - Always start with a smaller number (more negative if negative) and then increase from there. The value for percentile 10 should always be less than the value for percentile 20, and so on.
 
             Before answering you write:
-            (a) The time left until the outcome to the question is known.
-            (b) The outcome if nothing changed.
+(a) Calculate the time left from today's date to the question's resolution date. Double-check the calendar arithmetic and state the result in days or months.            (b) The outcome if nothing changed.
             (c) The outcome if the current trend continued.
             (d) The expectations of experts and markets.
             (e) A brief description of an unexpected scenario that results in a low outcome.
