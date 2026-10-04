@@ -3,7 +3,7 @@ name: Forecast on new AI tournament questions
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,27,47 * * * *" # every 20 min, offset off the hour. Make sure to skip already-forecasted questions!
+    - cron: "7,17,27,37,47,57 * * * *" # every 10 min, offset off the hour Make sure to skip already-forecasted questions!
 
 
 
