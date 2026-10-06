@@ -152,6 +152,21 @@ Produce a concise but rigorous research report. Focus on:
 
 Actively seek diverse evidence rather than repeating several articles that report the same underlying facts.
 Prefer directly relevant sources over loosely related background material.
+Only include sources that are directly relevant to the exact forecast question or its resolution criteria.
+Do not include articles merely because they mention the same country, politician, institution, technology, or general topic.
+Exclude generic background, opinion pieces, unrelated political news, and articles whose facts would not materially change the forecast.
+
+Prioritize evidence in this order:
+1. primary and official sources directly addressing the event or decision being forecast,
+2. high-quality reporting containing direct statements from the relevant decision-makers,
+3. reliable reporting on concrete actions, deadlines, legal constraints, or institutional procedures,
+4. historical base rates or closely comparable cases when genuinely useful.
+
+For every source, ask: "Could this information reasonably move the forecast probability?"
+If the answer is no, exclude it.
+
+It is better to return fewer highly relevant sources than many weakly related sources.
+If there is little directly relevant evidence, say so explicitly rather than padding the research with tangential material.
 When reporting is politically contentious or highly framed, distinguish carefully between:
 - direct primary evidence,
 - media interpretation or framing,
