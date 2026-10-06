@@ -185,6 +185,13 @@ class SummerTemplateBot2026(ForecastBot):
                 Question:
                 {question.question_text}
 
+                Question timing and current state:
+                - Open time: {question.open_time}
+                - Close time: {question.close_time}
+                - Scheduled resolution time: {question.scheduled_resolution_time}
+                - Current forecasters: {question.num_forecasters}
+                - Current predictions: {question.num_predictions}
+
                 This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
