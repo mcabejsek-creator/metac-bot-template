@@ -456,6 +456,7 @@ class SummerTemplateBot2026(ForecastBot):
 - Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
 - Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
 - Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
+The current forecaster count is observed AFTER the question opened. Do not describe it as pre-open data. "Days since open" is the elapsed participation period for the current count.
 - Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
 IMPORTANT: "Days until close" and "Days until scheduled resolution" above are the authoritative REMAINING time from today. Use those exact numbers. Do not confuse them with the question's total open duration. A figure such as 730 days may describe the TOTAL open duration and must NOT be used as the remaining time.
 Do not confuse the resolution metric with the current participation trend. Current forecasters divided by total open duration is only the final resolved value if no more forecasters join. If discussing the current arrival rate, use days since open, and do not extrapolate an early rate linearly unless justified by evidence.
