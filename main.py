@@ -722,7 +722,7 @@ predictions_per_research_report=3,
                 timeout=40,
                 allowed_tries=2,
             ),
-            "researcher": "asknews/news-summaries",
+            "researcher": "openrouter/openai/gpt-4o-search-preview"
             "parser": "openrouter/openai/gpt-4o-mini",
         },
     )
