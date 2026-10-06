@@ -722,7 +722,7 @@ predictions_per_research_report=3,
                 timeout=40,
                 allowed_tries=2,
             ),
-            "researcher": "openrouter/openai/gpt-4o-search-preview",
+            "researcher": "perplexity-agent",
             "parser": "openrouter/openai/gpt-4o-mini",
         },
     )
