@@ -191,7 +191,13 @@ class SummerTemplateBot2026(ForecastBot):
                 - Scheduled resolution time: {question.scheduled_resolution_time}
                 - Current forecasters: {question.num_forecasters}
                 - Current predictions: {question.num_predictions}
+- Today: {datetime.now(timezone.utc).date()}
+- Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
+- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
+- Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
 
+Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
+Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
                 This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
