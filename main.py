@@ -454,7 +454,7 @@ class SummerTemplateBot2026(ForecastBot):
 - Current forecasters: {question.num_forecasters}
 - Current predictions: {question.num_predictions}
 
-Use these dates exactly. Do not guess, infer, or substitute any other opening, closing, or resolution date.
+Use these dates and day counts exactly. Do not calculate, guess, infer, or substitute any other opening, closing, or resolution date.
 
             {lower_bound_message}
             {upper_bound_message}
