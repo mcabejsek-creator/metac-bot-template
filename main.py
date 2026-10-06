@@ -453,8 +453,9 @@ class SummerTemplateBot2026(ForecastBot):
 - Scheduled resolution time: {question.scheduled_resolution_time}
 - Current forecasters: {question.num_forecasters}
 - Current predictions: {question.num_predictions}
-
-Use these dates and day counts exactly. Do not calculate, guess, infer, or substitute any other opening, closing, or resolution date.
+- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
+- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
+IMPORTANT: "Days until close" and "Days until scheduled resolution" above are the authoritative REMAINING time from today. Use those exact numbers. Do not confuse them with the question's total open duration. A figure such as 730 days may describe the TOTAL open duration and must NOT be used as the remaining time.
 
             {lower_bound_message}
             {upper_bound_message}
@@ -465,7 +466,7 @@ Use these dates and day counts exactly. Do not calculate, guess, infer, or subst
             - Always start with a smaller number (more negative if negative) and then increase from there. The value for percentile 10 should always be less than the value for percentile 20, and so on.
 
             Before answering you write:
-(a) State the exact provided days until close and scheduled resolution. Do not recalculate them.            (b) The outcome if nothing changed.
+(a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.          (b) The outcome if nothing changed.
             (c) The outcome if the current trend continued.
             (d) The expectations of experts and markets.
             (e) A brief description of an unexpected scenario that results in a low outcome.
