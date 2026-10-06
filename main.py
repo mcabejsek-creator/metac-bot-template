@@ -710,7 +710,7 @@ if __name__ == "__main__":
     template_bot = SummerTemplateBot2026(
         research_reports_per_question=2,
 predictions_per_research_report=3,
-        use_research_summary_to_forecast=False,
+        use_research_summary_to_forecast=True,
         publish_reports_to_metaculus=publish_to_metaculus,
         folder_to_save_reports_to=None,
         skip_previously_forecasted_questions=True,
