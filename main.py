@@ -200,7 +200,7 @@ Do not produce the final forecast yourself.
                 or researcher == "asknews/deep-research/high-depth"
             ):
                 research = await AskNewsSearcher().call_preconfigured_version(
-                    researcher, prompt
+                    researcher, question.question_text
                 )
             elif researcher.startswith("smart-searcher"):
                 model_name = researcher.removeprefix("smart-searcher/")
