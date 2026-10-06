@@ -131,55 +131,56 @@ class SummerTemplateBot2026(ForecastBot):
 
     ##################################### RESEARCH #####################################
 
-    async def run_research(self, question: MetaculusQuestion) -> str:
+        async def run_research(self, question: MetaculusQuestion) -> str:
         async with self._concurrency_limiter:
             research = ""
             researcher = self.get_llm("researcher")
 
             prompt = clean_indents(
                 f"""
-              You are a research assistant to a highly skilled superforecaster.
-The superforecaster will give you a question they intend to forecast on.
+                You are a research assistant to a highly skilled superforecaster.
+                The superforecaster will give you a question they intend to forecast on.
 
-Produce a concise but rigorous research report. Focus on:
-- the most recent and reliable information directly relevant to the resolution criteria,
-- current quantitative data and the strongest available primary or authoritative sources,
-- historical base rates and comparable past cases,
-- evidence supporting the most likely outcome,
-- strong contrary evidence and reasons the apparent consensus could be wrong,
-- information that would materially distinguish between possible outcomes,
-- uncertainty, missing information, and plausible surprises.
+                Produce a concise but rigorous research report. Focus on:
+                - the most recent and reliable information directly relevant to the resolution criteria,
+                - current quantitative data and the strongest available primary or authoritative sources,
+                - historical base rates and comparable past cases,
+                - evidence supporting the most likely outcome,
+                - strong contrary evidence and reasons the apparent consensus could be wrong,
+                - information that would materially distinguish between possible outcomes,
+                - uncertainty, missing information, and plausible surprises.
 
-Actively seek diverse evidence rather than repeating several articles that report the same underlying facts.
-Prefer directly relevant sources over loosely related background material.
-Only include sources that are directly relevant to the exact forecast question or its resolution criteria.
-Do not include articles merely because they mention the same country, politician, institution, technology, or general topic.
-Exclude generic background, opinion pieces, unrelated political news, and articles whose facts would not materially change the forecast.
+                Actively seek diverse evidence rather than repeating several articles that report the same underlying facts.
+                Prefer directly relevant sources over loosely related background material.
+                Only include sources that are directly relevant to the exact forecast question or its resolution criteria.
+                Do not include articles merely because they mention the same country, politician, institution, technology, or general topic.
+                Exclude generic background, opinion pieces, unrelated political news, and articles whose facts would not materially change the forecast.
 
-Prioritize evidence in this order:
-1. primary and official sources directly addressing the event or decision being forecast,
-2. high-quality reporting containing direct statements from the relevant decision-makers,
-3. reliable reporting on concrete actions, deadlines, legal constraints, or institutional procedures,
-4. historical base rates or closely comparable cases when genuinely useful.
+                Prioritize evidence in this order:
+                1. primary and official sources directly addressing the event or decision being forecast,
+                2. high-quality reporting containing direct statements from the relevant decision-makers,
+                3. reliable reporting on concrete actions, deadlines, legal constraints, or institutional procedures,
+                4. historical base rates or closely comparable cases when genuinely useful.
 
-For every source, ask: "Could this information reasonably move the forecast probability?"
-If the answer is no, exclude it.
+                For every source, ask: "Could this information reasonably move the forecast probability?"
+                If the answer is no, exclude it.
 
-It is better to return fewer highly relevant sources than many weakly related sources.
-If there is little directly relevant evidence, say so explicitly rather than padding the research with tangential material.
-When reporting is politically contentious or highly framed, distinguish carefully between:
-- direct primary evidence,
-- media interpretation or framing,
-- rhetorical statements, threats, or speculation,
-- concrete administrative or legal actions,
-- and actions that are actually feasible before the resolution deadline.
+                It is better to return fewer highly relevant sources than many weakly related sources.
+                If there is little directly relevant evidence, say so explicitly rather than padding the research with tangential material.
 
-Do not infer intent or plans from headlines alone.
-Prefer primary documents, court filings, official statements, and independently corroborated facts over commentary or partisan framing.
-When possible, compare reporting from sources with different editorial perspectives.
+                When reporting is politically contentious or highly framed, distinguish carefully between:
+                - direct primary evidence,
+                - media interpretation or framing,
+                - rhetorical statements, threats, or speculation,
+                - concrete administrative or legal actions,
+                - and actions that are actually feasible before the resolution deadline.
 
-Prioritize facts that can materially change the forecast. Do not merely summarize general background.
-Do not produce the final forecast yourself.
+                Do not infer intent or plans from headlines alone.
+                Prefer primary documents, court filings, official statements, and independently corroborated facts over commentary or partisan framing.
+                When possible, compare reporting from sources with different editorial perspectives.
+
+                Prioritize facts that can materially change the forecast. Do not merely summarize general background.
+                Do not produce the final forecast yourself.
 
                 Question:
                 {question.question_text}
@@ -191,7 +192,7 @@ Do not produce the final forecast yourself.
                 """
             )
 
-                        if isinstance(researcher, GeneralLlm):
+            if isinstance(researcher, GeneralLlm):
                 research = await researcher.invoke(prompt)
 
             elif researcher == "perplexity-agent":
@@ -215,7 +216,7 @@ Do not produce the final forecast yourself.
                         method="POST",
                     )
 
-                    with urllib.request.urlopen(request, timeout=120) as response:
+                    with urllib.request.urlopen(request, timeout=180) as response:
                         data = json.loads(response.read().decode("utf-8"))
 
                     answer_parts = []
@@ -269,6 +270,7 @@ Do not produce the final forecast yourself.
 
             else:
                 research = await self.get_llm("researcher", "llm").invoke(prompt)
+
             logger.info(f"Found Research for URL {question.page_url}:\n{research}")
             return research
 
