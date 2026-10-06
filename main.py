@@ -131,7 +131,7 @@ class SummerTemplateBot2026(ForecastBot):
 
     ##################################### RESEARCH #####################################
 
-        async def run_research(self, question: MetaculusQuestion) -> str:
+    async def run_research(self, question: MetaculusQuestion) -> str:
         async with self._concurrency_limiter:
             research = ""
             researcher = self.get_llm("researcher")
