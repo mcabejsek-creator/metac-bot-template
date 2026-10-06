@@ -722,7 +722,7 @@ predictions_per_research_report=3,
                 timeout=40,
                 allowed_tries=2,
             ),
-            "researcher": "perplexity/sonar-pro",
+            "researcher": "openrouter/perplexity/sonar-pro",
             "parser": "openrouter/openai/gpt-4o-mini",
         },
     )
