@@ -191,8 +191,58 @@ Do not produce the final forecast yourself.
                 """
             )
 
-            if isinstance(researcher, GeneralLlm):
+                        if isinstance(researcher, GeneralLlm):
                 research = await researcher.invoke(prompt)
+
+            elif researcher == "perplexity-agent":
+                import json
+                import os
+                import urllib.request
+
+                def call_perplexity_agent():
+                    request = urllib.request.Request(
+                        "https://api.perplexity.ai/v1/agent",
+                        data=json.dumps(
+                            {
+                                "preset": "fast",
+                                "input": prompt,
+                            }
+                        ).encode("utf-8"),
+                        headers={
+                            "Authorization": f"Bearer {os.environ['PERPLEXITY_API_KEY']}",
+                            "Content-Type": "application/json",
+                        },
+                        method="POST",
+                    )
+
+                    with urllib.request.urlopen(request, timeout=120) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+
+                    answer_parts = []
+                    sources = []
+
+                    for item in data.get("output", []):
+                        if item.get("type") == "message":
+                            for content in item.get("content", []):
+                                if content.get("type") == "output_text":
+                                    answer_parts.append(content.get("text", ""))
+
+                        elif item.get("type") == "search_results":
+                            for result in item.get("results", []):
+                                title = result.get("title", "")
+                                url = result.get("url", "")
+                                if url:
+                                    sources.append(f"- {title}: {url}")
+
+                    research_text = "\n".join(answer_parts)
+
+                    if sources:
+                        research_text += "\n\nSources:\n" + "\n".join(sources)
+
+                    return research_text
+
+                research = await asyncio.to_thread(call_perplexity_agent)
+
             elif (
                 researcher == "asknews/news-summaries"
                 or researcher == "asknews/deep-research/low-depth"
@@ -202,6 +252,7 @@ Do not produce the final forecast yourself.
                 research = await AskNewsSearcher().call_preconfigured_version(
                     researcher, question.question_text
                 )
+
             elif researcher.startswith("smart-searcher"):
                 model_name = researcher.removeprefix("smart-searcher/")
                 searcher = SmartSearcher(
@@ -212,8 +263,10 @@ Do not produce the final forecast yourself.
                     use_advanced_filters=False,
                 )
                 research = await searcher.invoke(prompt)
+
             elif not researcher or researcher == "None" or researcher == "no_research":
                 research = ""
+
             else:
                 research = await self.get_llm("researcher", "llm").invoke(prompt)
             logger.info(f"Found Research for URL {question.page_url}:\n{research}")
