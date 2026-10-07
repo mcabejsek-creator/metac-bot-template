@@ -374,7 +374,10 @@ Preserve the resolution formula exactly as written in the resolution criteria. D
 
             Your research assistant says:
             {research}
-
+Use only factual claims and historical patterns supported by the question or the research above.
+Do not invent base rates, historical tendencies, polling patterns, endorsements, precedents, or other evidence.
+If the research says that a useful base rate or comparison is unavailable, treat it as unavailable.
+In elections and other competitive events, do not treat the current leader as a "status quo" outcome merely because they are currently ahead.
             Today is {datetime.now().strftime("%Y-%m-%d")}.
 
             Before answering you write:
@@ -383,8 +386,7 @@ Preserve the resolution formula exactly as written in the resolution criteria. D
             (c) A description of an scenario that results in an unexpected outcome.
 
             {self._get_conditional_disclaimer_if_necessary(question)}
-            You write your rationale remembering that (1) good forecasters put extra weight on the status quo outcome since the world changes slowly most of the time, and (2) good forecasters leave some moderate probability on most options to account for unexpected outcomes.
-
+            You write your rationale weighing evidence by relevance and reliability. Apply status-quo reasoning only when the question genuinely has a persistent status quo; do not use it automatically in elections or competitive events. Leave some moderate probability on plausible options to account for unexpected outcomes.
             The last thing you write is your final probabilities for the N options in this order {question.options} as:
             Option_A: Probability_A
             Option_B: Probability_B
