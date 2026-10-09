@@ -321,6 +321,7 @@ Preserve the resolution formula exactly as written in the resolution criteria. D
             (d) A brief description of a scenario that results in a Yes outcome.
 
             You write your rationale weighing evidence by relevance and reliability. Do not automatically favor Yes or No as a "status quo" outcome. For elections, contests, threshold questions, competitions, and other one-off events, apply status-quo reasoning only if a genuine persistent baseline exists. Do not treat indirect proxy evidence, such as the average of all entries, as direct evidence about the winner or threshold unless the research supports that relationship.
+            Do not treat proxy indicators, related metrics, individual polls, or adjacent measures as if they were the resolution metric. If the exact resolution metric, threshold, or time series is unavailable, preserve that uncertainty. Do not infer a trend in the resolution metric from proxy evidence unless the research explicitly supports that relationship.
             {self._get_conditional_disclaimer_if_necessary(question)}
 
             The last thing you write is your final answer as: "Probability: ZZ%", 0-100
