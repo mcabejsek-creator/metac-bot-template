@@ -478,8 +478,9 @@ Do not confuse the resolution metric with the current participation trend. Curre
 
             Before answering you write:
 (a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.          (b) The outcome if nothing changed.
-            (c) The outcome if the current trend continued.
-            (d) The expectations of experts and markets.
+           (c) If a genuine quantitative trend over time is explicitly supported by the research, describe what would happen if it continued. Do not infer a trend from a single snapshot, one prior result, a first-round result, or a proxy metric. If no supported trend exists, state that clearly and do not invent one.
+
+(d) Relevant expert forecasts, market expectations, polls, or external projections only if explicitly present in the research. Do not relabel the research assistant's own estimate as expert or market consensus. If none are available, state that clearly.
             (e) A brief description of an unexpected scenario that results in a low outcome.
             (f) A brief description of an unexpected scenario that results in a high outcome.
 
