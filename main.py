@@ -380,6 +380,7 @@ Use only factual claims and historical patterns supported by the question or the
 Do not invent base rates, historical tendencies, polling patterns, endorsements, precedents, or other evidence.
 If the research says that a useful base rate or comparison is unavailable, treat it as unavailable.
 In elections and other competitive events, do not treat the current leader as a "status quo" outcome merely because they are currently ahead.
+            When the resolution criteria specify an exact time window, only count events that can occur within that window. Do not infer the number remaining in the resolution window by subtracting completed events from a broader-period total if some remaining events fall outside the window.
             Today is {datetime.now().strftime("%Y-%m-%d")}.
 
             Before answering you write:
