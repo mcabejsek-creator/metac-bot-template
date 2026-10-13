@@ -480,7 +480,7 @@ Do not confuse the resolution metric with the current participation trend. Curre
             - Always start with a smaller number (more negative if negative) and then increase from there. The value for percentile 10 should always be less than the value for percentile 20, and so on.
 
             Before answering you write:
-(a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.          (b) The outcome if nothing changed.
+(a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.          (b) The outcome if nothing changed, based only on the current real-world state and the resolution metric. Do not use Metaculus community forecasts or current forecasters' predictions as the status quo.
            (c) If a genuine quantitative trend over time is explicitly supported by the research, describe what would happen if it continued. Do not infer a trend from a single snapshot, one prior result, a first-round result, or a proxy metric. If no supported trend exists, state that clearly and do not invent one.
 
 (d) Relevant expert forecasts, market expectations, polls, or external projections only if explicitly present in the research. Do not relabel the research assistant's own estimate as expert or market consensus. If none are available, state that clearly.
