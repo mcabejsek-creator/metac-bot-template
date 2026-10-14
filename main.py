@@ -166,6 +166,7 @@ class SummerTemplateBot2026(ForecastBot):
                 If the answer is no, exclude it.
 
                 It is better to return fewer highly relevant sources than many weakly related sources.
+                For cumulative-count questions, verify the current count directly from the primary resolution source whenever possible. Enumerate the qualifying items or events and check that the stated count matches that list. If the metric cannot decrease, explicitly state the current confirmed minimum and that outcomes below it are impossible.
                 If there is little directly relevant evidence, say so explicitly rather than padding the research with tangential material.
 
                 When reporting is politically contentious or highly framed, distinguish carefully between:
