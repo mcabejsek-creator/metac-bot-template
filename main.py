@@ -145,6 +145,7 @@ class SummerTemplateBot2026(ForecastBot):
                 - the most recent and reliable information directly relevant to the resolution criteria,
                 - current quantitative data and the strongest available primary or authoritative sources,
                 - historical base rates and comparable past cases,
+                - when part of the relevant period has already elapsed, actively seek historical or conditional base rates for the remaining portion of the period, rather than relying only on full-period averages or general historical context,
                 - evidence supporting the most likely outcome,
                 - strong contrary evidence and reasons the apparent consensus could be wrong,
                 - information that would materially distinguish between possible outcomes,
