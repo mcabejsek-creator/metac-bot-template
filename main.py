@@ -186,7 +186,8 @@ class SummerTemplateBot2026(ForecastBot):
 
                 Question:
                 {question.question_text}
-
+                Background information supplied by Metaculus:
+                {question.background_info}
                 Question timing and current state:
                 - Open time: {question.open_time}
                 - Close time: {question.close_time}
