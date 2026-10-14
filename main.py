@@ -384,9 +384,15 @@ If the research says that a useful base rate or comparison is unavailable, treat
 In elections and other competitive events, do not treat the current leader as a "status quo" outcome merely because they are currently ahead.
             When the resolution criteria specify an exact time window, only count events that can occur within that window. Do not infer the number remaining in the resolution window by subtracting completed events from a broader-period total if some remaining events fall outside the window.
             Today is {datetime.now().strftime("%Y-%m-%d")}.
+Question timing from Metaculus (authoritative):
+- Close time: {question.close_time}
+- Scheduled resolution time: {question.scheduled_resolution_time}
+- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
+- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
 
+Treat these timing values as authoritative. Do not calculate or infer a different remaining time horizon. The question may resolve earlier if its resolution criteria allow it, but never invent a later deadline.
             Before answering you write:
-            (a) The time left until the outcome to the question is known.
+            (a) State the exact remaining days until scheduled resolution from the authoritative value above, and note if the resolution criteria allow the outcome to become known earlier.
             (b) The status quo outcome if nothing changed.
             (c) A description of an scenario that results in an unexpected outcome.
 
