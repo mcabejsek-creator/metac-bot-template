@@ -583,13 +583,12 @@ Respect all hard logical bounds implied by the current state and the resolution 
             - Always start with a lower date chronologically and then increase from there.
             - Do NOT forget this. The dates must be written in chronological order starting at the earliest time at percentile 10 and increasing from there.
             Before answering you write:
-            (a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.
-            (b) The outcome if nothing changed, based only on the current real-world state and the resolution metric.
-            (c) Calculate any hard lower or upper bounds implied by the current observed state and the resolution formula. Show the calculation explicitly. Every percentile in the final answer must respect these bounds. For a cumulative count or total that cannot decrease, no percentile may be below the value already guaranteed by the current observation.
-            (d) If a genuine quantitative trend over time is explicitly supported by the research, describe what would happen if it continued. Do not infer a trend from a single snapshot, one prior result, a first-round result, or a proxy metric. If no supported trend exists, state that clearly.
-            (e) Relevant expert forecasts, market expectations, polls, or external projections only if explicitly present in the research. Do not relabel the research assistant's own estimate as expert or market consensus. If none are available, state that clearly.
-            (f) A brief description of an unexpected scenario that results in a low outcome.
-            (g) A brief description of an unexpected scenario that results in a high outcome.
+            (a) The time left until the outcome to the question is known.
+            (b) The outcome if nothing changed.
+            (c) The outcome if the current trend continued.
+            (d) The expectations of experts and markets.
+            (e) A brief description of an unexpected scenario that results in a low outcome.
+            (f) A brief description of an unexpected scenario that results in a high outcome.
 
             {self._get_conditional_disclaimer_if_necessary(question)}
             You remind yourself that good forecasters are humble and set wide 90/10 confidence intervals to account for unknown unknowns.
