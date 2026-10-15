@@ -156,7 +156,7 @@ class SummerTemplateBot2026(ForecastBot):
                 Only include sources that are directly relevant to the exact forecast question or its resolution criteria.
                 Do not include articles merely because they mention the same country, politician, institution, technology, or general topic.
                 Exclude generic background, opinion pieces, unrelated political news, and articles whose facts would not materially change the forecast.
-
+                When the resolution criteria name a specific resolution source, tracker, database, spreadsheet, or official page, first try to retrieve the current value or status from that exact source. Do not substitute polls, news reports, proxy metrics, or secondary summaries unless the exact resolution source is unavailable; if it is unavailable, state that explicitly.
                 Prioritize evidence in this order:
                 1. primary and official sources directly addressing the event or decision being forecast,
                 2. high-quality reporting containing direct statements from the relevant decision-makers,
