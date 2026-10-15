@@ -317,7 +317,7 @@ When a source reports multiple related metrics, identify the exact metric used b
             {research}
 
             Today is {datetime.now().strftime("%Y-%m-%d")}.
-
+            First, explicitly determine from the question and resolution criteria what a Yes outcome means and what a No outcome means. Do not reverse these labels based on which candidate, side, or outcome is currently leading. Before assigning probabilities, verify that every Yes scenario actually satisfies the Yes resolution criteria and every No scenario does not.
             Before answering you write:
             (a) The time left until the outcome to the question is known.
             (b) The status quo outcome if nothing changed.
