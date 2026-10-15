@@ -494,6 +494,7 @@ Respect all hard logical bounds implied by the current state and the resolution 
 (a) State the exact remaining days until close and until scheduled resolution from the authoritative values above.
 (b) The outcome if nothing changed, based only on the current real-world state and the resolution metric.
 (c) Calculate any hard lower or upper bounds implied by the current observed state and the resolution formula. Show the calculation explicitly. Every percentile in the final answer must respect these bounds. For a cumulative count or total that cannot decrease, no percentile may be below the value already guaranteed by the current observation.
+A hard bound must be logically or mathematically guaranteed by the resolution criteria and current state; do not treat a creator's expectation, likely range, forecast, or stated belief as a hard bound.
 (d) If a genuine quantitative trend over time is explicitly supported by the research, describe what would happen if it continued. Do not infer a trend from a single snapshot, one prior result, a first-round result, or a proxy metric. If no supported trend exists, state that clearly.
 (e) Relevant expert forecasts, market expectations, polls, or external projections only if explicitly present in the research. Do not relabel the research assistant's own estimate as expert or market consensus. If none are available, state that clearly.
 (f) A brief description of an unexpected scenario that results in a low outcome.
