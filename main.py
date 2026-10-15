@@ -484,7 +484,7 @@ IMPORTANT: "Days until close" and "Days until scheduled resolution" above are th
 Do not confuse the resolution metric with the current participation trend. Current forecasters divided by total open duration is only the final resolved value if no more forecasters join. If discussing the current arrival rate, use days since open, and do not extrapolate an early rate linearly unless justified by evidence.
             {lower_bound_message}
             {upper_bound_message}
-
+Respect all hard logical bounds implied by the current state and the resolution criteria. For cumulative counts or totals that cannot decrease, no forecast percentile may imply a final value below the minimum already guaranteed by the current observed value, unless the resolution source explicitly allows downward revisions or corrections.
             Formatting Instructions:
             - Please notice the units requested and give your answer in these units (e.g. whether you represent a number as 1,000,000 or 1 million).
             - Never use scientific notation.
