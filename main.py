@@ -201,6 +201,7 @@ class SummerTemplateBot2026(ForecastBot):
 
 Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
 Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
+When a source reports multiple related metrics, identify the exact metric used by the resolution criteria and do not substitute a broader, adjacent, or similarly named metric. Explicitly verify that every quoted number measures the same resolution metric before using it in calculations.                
                 This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
