@@ -384,6 +384,7 @@ When the resolution criteria can be satisfied through more than one event, attem
 
             Your research assistant says:
             {research}
+Before assigning probabilities, explicitly determine the exact resolution condition for each answer option and map evidence only to the option it directly supports. Do not confuse influencing, supporting, enabling, or acting as a coalition partner or kingmaker with satisfying an option that requires actually leading, winning, controlling, or otherwise meeting a specific resolution condition.
 Use only factual claims and historical patterns supported by the question or the research above.
 Do not invent base rates, historical tendencies, polling patterns, endorsements, precedents, or other evidence.
 If the research says that a useful base rate or comparison is unavailable, treat it as unavailable.
