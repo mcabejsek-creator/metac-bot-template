@@ -204,6 +204,7 @@ Preserve the resolution formula exactly as written in the resolution criteria. D
 When the resolution depends on the latest N polls, observations, reports, or other items from a specific source, verify that you have identified the full required set of N items from that source before reasoning about the current state. If necessary, include older items outside the current month or immediate time window rather than incorrectly treating the set as incomplete.
 When a source reports multiple related metrics, identify the exact metric used by the resolution criteria and do not substitute a broader, adjacent, or similarly named metric. Explicitly verify that every quoted number measures the same resolution metric before using it in calculations.                
 When the resolution criteria can be satisfied through more than one event, attempt, or pathway before the deadline, identify all materially plausible qualifying pathways. Do not assume that the most imminent or most discussed event is the only opportunity unless the evidence establishes that.
+Before stating that an outcome has already occurred or that an event currently satisfies the question, verify that the event falls inside every required resolution time window. An otherwise qualifying event outside the specified window must not be treated as satisfying the question.
                 This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
