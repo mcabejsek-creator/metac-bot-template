@@ -318,6 +318,13 @@ When identifying the current state or closest observed benchmark, "observed" mea
             {research}
 
             Today is {datetime.now().strftime("%Y-%m-%d")}.
+            Question timing from Metaculus (authoritative):
+- Close time: {self._get_effective_close_time(question)}
+- Scheduled resolution time: {question.scheduled_resolution_time}
+- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}
+- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
+
+Treat these timing values as authoritative. Do not confuse the close time with the scheduled resolution time.
             First, explicitly determine from the question and resolution criteria what a Yes outcome means and what a No outcome means. Do not reverse these labels based on which candidate, side, or outcome is currently leading. Before assigning probabilities, verify that every Yes scenario actually satisfies the Yes resolution criteria and every No scenario does not.
             Do not add any motive, purpose, threshold, exclusion, or other requirement that is not explicitly present in the resolution criteria or fine print. Treat the fine print as binding.
             Strictly distinguish resolution requirements from real-world causal, political, legal, or procedural conditions. Such conditions may affect the probability of the outcome, but they are not requirements for resolution unless the resolution criteria or fine print explicitly make them so.
