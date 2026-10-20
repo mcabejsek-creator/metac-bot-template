@@ -190,15 +190,14 @@ class SummerTemplateBot2026(ForecastBot):
                 {question.background_info}
                 Question timing and current state:
                 - Open time: {question.open_time}
-                - Close time: {question.close_time}
+                - Close time: {self._get_effective_close_time(question)}
                 - Scheduled resolution time: {question.scheduled_resolution_time}
                 - Current forecasters: {question.num_forecasters}
                 - Current predictions: {question.num_predictions}
 - Today: {datetime.now(timezone.utc).date()}
 - Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
-- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
-- Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
-
+- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}- Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
+- Total open duration in days: {(self._get_effective_close_time(question).date() - question.open_time.date()).days if question.open_time and self._get_effective_close_time(question) else "unknown"}
 Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
 Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
 When the resolution depends on the latest N polls, observations, reports, or other items from a specific source, verify that you have identified the full required set of N items from that source before reasoning about the current state. If necessary, include older items outside the current month or immediate time window rather than incorrectly treating the set as incomplete.
