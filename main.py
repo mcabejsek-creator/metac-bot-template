@@ -650,6 +650,13 @@ Respect all hard logical bounds implied by the current state and the resolution 
             f"Forecasted URL {question.page_url} with prediction: {prediction.declared_percentiles}."
         )
         return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
+    def _get_effective_close_time(
+        self, question: MetaculusQuestion
+    ) -> datetime | None:
+        actual_close_raw = question.api_json.get("question", {}).get("actual_close_time")
+        if actual_close_raw is not None:
+            return question._parse_api_date(actual_close_raw)
+        return question.close_time
 
     def _create_upper_and_lower_bound_messages(
         self, question: NumericQuestion | DateQuestion
