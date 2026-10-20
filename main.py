@@ -548,6 +548,7 @@ Respect all hard logical bounds implied by the current state and the resolution 
             num_validation_samples=self._structure_output_validation_samples,
         )
         prediction = NumericDistribution.from_question(percentile_list, question)
+        prediction.get_cdf()
         logger.info(
             f"Forecasted URL {question.page_url} with prediction: {prediction.declared_percentiles}."
         )
