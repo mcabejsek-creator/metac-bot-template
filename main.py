@@ -196,14 +196,16 @@ class SummerTemplateBot2026(ForecastBot):
                 - Current predictions: {question.num_predictions}
 - Today: {datetime.now(timezone.utc).date()}
 - Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
-- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}- Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
+- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}
 - Total open duration in days: {(self._get_effective_close_time(question).date() - question.open_time.date()).days if question.open_time and self._get_effective_close_time(question) else "unknown"}
 Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
 Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
 When the resolution depends on the latest N polls, observations, reports, or other items from a specific source, verify that you have identified the full required set of N items from that source before reasoning about the current state. If necessary, include older items outside the current month or immediate time window rather than incorrectly treating the set as incomplete.
 When a source reports multiple related metrics, identify the exact metric used by the resolution criteria and do not substitute a broader, adjacent, or similarly named metric. Explicitly verify that every quoted number measures the same resolution metric before using it in calculations.                
 When the resolution criteria can be satisfied through more than one event, attempt, or pathway before the deadline, identify all materially plausible qualifying pathways. Do not assume that the most imminent or most discussed event is the only opportunity unless the evidence establishes that.
-When identifying the current state or closest observed benchmark, "observed" means an actual realized value from the resolution source, or from an explicitly equivalent source using the same definition and methodology. Never call a forecast, projection, estimate, scenario, target, or value from a different source an observed benchmark. If the future-period resolved value does not yet exist, use the latest realized value from the same resolution series if available; otherwise state that no compatible observed benchmark exists. Forecasts and projections belong in the expert-forecast section, not in the current-state benchmark.                This question's outcome will be determined by the specific criteria below:
+When identifying the current state or closest observed benchmark, "observed" means an actual realized value from the resolution source, or from an explicitly equivalent source using the same definition and methodology. Never call a forecast, projection, estimate, scenario, target, or value from a different source an observed benchmark. If the future-period resolved value does not yet exist, use the latest realized value from the same resolution series if available; otherwise state that no compatible observed benchmark exists. Forecasts and projections belong in the expert-forecast section, not in the current-state benchmark.                
+
+This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
                 {question.fine_print}
@@ -505,7 +507,7 @@ Respect all hard logical bounds implied by the current state and the resolution 
 (b) Determine whether a literal "nothing changed" outcome is meaningful for this resolution metric. If the current observed state can directly be carried forward to the resolved value, calculate that value. If the question concerns a future period or quantity that does not yet exist, state that no literal "nothing changed" outcome is defined; instead identify the closest compatible observed benchmark without treating it as the future resolved value and without extrapolating a trend. An observed benchmark must be an actual realized value from the resolution source, or from an explicitly equivalent source using the same definition and methodology. Never call a forecast, projection, estimate, scenario, target, or differently defined metric an observed benchmark. If no compatible observed benchmark exists, state that clearly.
 
 (c) First determine whether any true hard lower or upper bound exists. A hard bound exists only if it is logically or mathematically impossible for the resolved value to cross it given the resolution criteria and current observed state. Historical values, creator-provided likely ranges, forecasts, estimates, past minima or maxima, and recent observations are not hard bounds by themselves. For a cumulative total measured over a period already in progress, any already realized amount that is part of the final resolution total is a true hard lower bound unless the resolution source can revise that amount downward. A partial-period cumulative value is not merely a benchmark; it is a lower bound on the final cumulative total. If no true hard bound exists, explicitly state that no hard bound is established and do not constrain the forecast percentiles by one.
-
+For cumulative metrics, any already-realized confirmed cumulative value is a hard lower bound unless the resolution criteria explicitly allow the value to be revised downward; never place any forecast percentile below that confirmed minimum.
 (d) If a genuine quantitative trend over time is explicitly supported by the research, describe what would happen if it continued. Do not infer a trend from a single snapshot, one prior result, a first-round result, or a proxy metric. If no supported trend exists, state that clearly.
 (e) Relevant expert forecasts, market expectations, polls, or external projections only if explicitly present in the research. Do not relabel the research assistant's own estimate as expert or market consensus. If none are available, state that clearly.
 (f) A brief description of an unexpected scenario that results in a low outcome.
@@ -832,16 +834,17 @@ predictions_per_research_report=3,
         skip_previously_forecasted_questions=True,
         extra_metadata_in_explanation=True,
                 llms={
-            "default": GeneralLlm(
-                model="openrouter/openai/gpt-4o",
-                temperature=0.3,
-                timeout=40,
-                allowed_tries=2,
-            ),
-            "researcher": "perplexity-agent",
-            "parser": "openrouter/openai/gpt-4o-mini",
-        },
-    )
+    "default": GeneralLlm(
+        model="openrouter/openai/gpt-4o",
+        temperature=0.3,
+        timeout=40,
+        allowed_tries=2,
+    ),
+    "summarizer": "openrouter/openai/gpt-4o-mini",
+    "researcher": "perplexity-agent",
+    "parser": "openrouter/openai/gpt-4o-mini",
+},
+)
 
     # Per-mode tournament URL shown in the summary banner footer. These
     # piggyback on the forecasting_tools SDK constants and need updating
