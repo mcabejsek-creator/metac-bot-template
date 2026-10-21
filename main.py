@@ -201,6 +201,7 @@ class SummerTemplateBot2026(ForecastBot):
 Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
 Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
 When the resolution depends on the latest N polls, observations, reports, or other items from a specific source, verify that you have identified the full required set of N items from that source before reasoning about the current state. If necessary, include older items outside the current month or immediate time window rather than incorrectly treating the set as incomplete.
+When using tables, time series, or multi-year projections, preserve the exact pairing between each date/year and its value. Verify every quoted date-value or year-value pair directly from the source before using it. Never assign a value from one year or period to another, and never infer a missing target-period value from an adjacent row. If the exact target-period value is unavailable, state explicitly that it is unavailable rather than substituting a nearby value.
 When a source reports multiple related metrics, identify the exact metric used by the resolution criteria and do not substitute a broader, adjacent, or similarly named metric. Explicitly verify that every quoted number measures the same resolution metric before using it in calculations.                
 When the resolution criteria can be satisfied through more than one event, attempt, or pathway before the deadline, identify all materially plausible qualifying pathways. Do not assume that the most imminent or most discussed event is the only opportunity unless the evidence establishes that.
 When identifying the current state or closest observed benchmark, "observed" means an actual realized value from the resolution source, or from an explicitly equivalent source using the same definition and methodology. Never call a forecast, projection, estimate, scenario, target, or value from a different source an observed benchmark. If the future-period resolved value does not yet exist, use the latest realized value from the same resolution series if available; otherwise state that no compatible observed benchmark exists. Forecasts and projections belong in the expert-forecast section, not in the current-state benchmark.                
@@ -840,7 +841,7 @@ predictions_per_research_report=3,
         timeout=40,
         allowed_tries=2,
     ),
-    "summarizer": "openrouter/openai/gpt-4o",
+    "summarizer": "openrouter/openai/gpt-4o-mini",
     "researcher": "perplexity-agent",
     "parser": "openrouter/openai/gpt-4o-mini",
 },
