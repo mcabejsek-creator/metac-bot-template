@@ -146,6 +146,7 @@ class SummerTemplateBot2026(ForecastBot):
                 - current quantitative data and the strongest available primary or authoritative sources,
                 - historical base rates and comparable past cases,
                 - when part of the relevant period has already elapsed, actively seek historical or conditional base rates for the remaining portion of the period, rather than relying only on full-period averages or general historical context,
+                - if no polling exists for the exact locality or population in the question, actively search for recent polling on the same issue in the closest relevant geographic population (for example the same state or region). Clearly label such polling as a proxy rather than direct evidence, but do not omit it when it is materially informative,
                 - evidence supporting the most likely outcome,
                 - strong contrary evidence and reasons the apparent consensus could be wrong,
                 - information that would materially distinguish between possible outcomes,
