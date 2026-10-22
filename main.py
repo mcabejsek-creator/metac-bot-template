@@ -222,13 +222,13 @@ This question's outcome will be determined by the specific criteria below:
                 import os
                 import urllib.request
 
-                def call_perplexity_agent():
+                def call_perplexity_agent(agent_prompt):
                     request = urllib.request.Request(
                         "https://api.perplexity.ai/v1/agent",
                         data=json.dumps(
                             {
                                 "preset": "fast",
-                                "input": prompt,
+                                "input": agent_prompt,
                             }
                         ).encode("utf-8"),
                         headers={
@@ -263,28 +263,45 @@ This question's outcome will be determined by the specific criteria below:
                         research_text += "\n\nSources:\n" + "\n".join(sources)
 
                     return research_text
+research = await asyncio.to_thread(call_perplexity_agent, prompt)
+                fact_check_prompt = clean_indents(
+    f"""
+    You are a meticulous fact-checker reviewing research for a forecasting question.
 
-                research = await asyncio.to_thread(call_perplexity_agent)
+    Forecast question:
+    {question.question_text}
 
-            elif (
-                researcher == "asknews/news-summaries"
-                or researcher == "asknews/deep-research/low-depth"
-                or researcher == "asknews/deep-research/medium-depth"
-                or researcher == "asknews/deep-research/high-depth"
-            ):
-                research = await AskNewsSearcher().call_preconfigured_version(
-                    researcher, question.question_text
-                )
+    Resolution criteria:
+    {question.resolution_criteria}
 
-            elif researcher.startswith("smart-searcher"):
-                model_name = researcher.removeprefix("smart-searcher/")
-                searcher = SmartSearcher(
-                    model=model_name,
-                    temperature=0,
-                    num_searches_to_run=2,
-                    num_sites_per_search=10,
-                    use_advanced_filters=False,
-                )
+    Original research:
+    {research}
+
+    Verify the research against reliable sources, prioritizing primary and official sources.
+
+    Pay special attention to:
+    - every numerical claim,
+    - every date-value and year-value pairing,
+    - tables and multi-year projections,
+    - whether a value is observed, estimated, projected, or forecast,
+    - whether the quoted metric exactly matches the resolution metric,
+    - calculations derived from source values.
+
+    Never assign a value from one year, date, category, or metric to another.
+    Never infer a missing target-period value from an adjacent table row.
+    If a numerical claim cannot be verified, remove it or explicitly state that it could not be verified.
+    If the original research contains an error, correct it using the source.
+    Preserve useful qualitative evidence when it remains supported.
+
+    Return a corrected, self-contained research report for the forecaster.
+    Do not discuss the fact-checking process itself and do not produce a forecast.
+    """
+)
+
+research = await asyncio.to_thread(
+    call_perplexity_agent,
+    fact_check_prompt,
+)
                 research = await searcher.invoke(prompt)
 
             elif not researcher or researcher == "None" or researcher == "no_research":
