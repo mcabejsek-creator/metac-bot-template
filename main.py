@@ -290,6 +290,7 @@ This question's outcome will be determined by the specific criteria below:
 
                     Never assign a value from one year, date, category, or metric to another.
                     Never infer a missing target-period value from an adjacent table row.
+                    If an exact target-period value is not visible in a source summary, actively search the primary source's tables, appendices, downloadable data, or supplemental files before concluding that the value is unavailable.
                     If a numerical claim cannot be verified, remove it or explicitly state that it could not be verified.
                     If the original research contains an error, correct it using the source.
                     Preserve useful qualitative evidence when it remains supported.
