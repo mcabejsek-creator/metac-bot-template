@@ -561,6 +561,7 @@ For cumulative metrics, any already-realized confirmed cumulative value is a har
             - This text is trying to answer the numeric question: "{question.question_text}".
             - When parsing the text, please make sure to give the values (the ones assigned to percentiles) in terms of the correct units.
             - The units for the forecast are: {question.unit_of_measure}
+            - If a percentile value is written as a bare number and is on the same numerical scale as the question's lower and upper bounds, preserve that number exactly as written. Do not rescale it based on units mentioned elsewhere in the reasoning. Only convert a percentile value when that percentile explicitly states a different unit.
             - Your work will be shown publicly with these units stated verbatim after the numbers your parse.
             - As an example, someone else guessed that the answer will be between {question.lower_bound} {question.unit_of_measure} and {question.upper_bound} {question.unit_of_measure}, so the numbers parsed from an answer like this would be verbatim "{question.lower_bound}" and "{question.upper_bound}".
             - If the answer doesn't give the answer in the correct units, you should parse it in the right units. For instance if the answer gives numbers as $500,000,000 and units are "B $" then you should parse the answer as 0.5 (since $500,000,000 is $0.5 billion).
