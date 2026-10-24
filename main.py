@@ -286,8 +286,8 @@ This question's outcome will be determined by the specific criteria below:
                     - tables and multi-year projections,
                     - whether a value is observed, estimated, projected, or forecast,
                     - whether the quoted metric exactly matches the resolution metric,
+                    When comparing numerical values, explicitly compare the exact metric required by the resolution criteria. Do not treat a larger lead, margin, ratio, or net support as a larger raw value when the resolution depends on the raw value itself.
                     - calculations derived from source values.
-
                     Never assign a value from one year, date, category, or metric to another.
                     Never infer a missing target-period value from an adjacent table row.
                     If an exact target-period value is not visible in a source summary, actively search the primary source's tables, appendices, downloadable data, or supplemental files before concluding that the value is unavailable.
@@ -362,7 +362,7 @@ Treat these timing values as authoritative. Do not confuse the close time with t
             Use only factual claims, historical patterns, standings, performance information, reports, and other evidence that are explicitly supported by the question or the research above. Do not introduce outside facts from memory or assumptions. If the research says such evidence is unavailable, treat it as unavailable.
             {self._get_conditional_disclaimer_if_necessary(question)}
 
-            The last thing you write is your final answer as: "Probability: ZZ%", 0-100
+            The last thing you write is your final answer as: "Probability of YES: ZZ%", 0-100. This must always be the probability that the question resolves Yes, never the probability of No. If your reasoning estimates the probability of No, convert it to 100% minus that probability before giving the final answer.
             """
         )
 
