@@ -429,11 +429,13 @@ Question timing from Metaculus (authoritative):
 Treat these timing values as authoritative. Do not calculate or infer a different remaining time horizon. The question may resolve earlier if its resolution criteria allow it, but never invent a later deadline.
             Before answering you write:
             (a) State the exact remaining days until scheduled resolution from the authoritative value above, and note if the resolution criteria allow the outcome to become known earlier.
-            (b) The status quo outcome if nothing changed.
+            (b) Determine whether a literal status quo outcome is meaningful for this question. For a new discrete selection, election, award, or annual choice, do not treat the previous winner or previous year's category as the status quo unless the resolution criteria explicitly make the outcome persistent.
             (c) A description of an scenario that results in an unexpected outcome.
 
             {self._get_conditional_disclaimer_if_necessary(question)}
             You write your rationale weighing evidence by relevance and reliability. Apply status-quo reasoning only when the question genuinely has a persistent status quo; do not use it automatically in elections or competitive events. Leave some moderate probability on plausible options to account for unexpected outcomes.
+            If the research contains betting-market odds, forecasts, or other quantitative estimates for the same outcome, use them as quantitative evidence where relevant rather than ignoring them, while accounting for their limitations.
+            Your final probabilities across all options must sum to exactly 100%. Check the arithmetic before giving the final answer.
             The last thing you write is your final probabilities for the N options in this order {question.options} as:
             Option_A: Probability_A
             Option_B: Probability_B
