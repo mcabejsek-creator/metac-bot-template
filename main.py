@@ -187,6 +187,8 @@ class SummerTemplateBot2026(ForecastBot):
 
                 Question:
                 {question.question_text}
+                Answer options (if applicable):
+                {getattr(question, "options", None)}
                 Background information supplied by Metaculus:
                 {question.background_info}
                 Question timing and current state:
