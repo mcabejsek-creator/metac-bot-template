@@ -1,0 +1,60 @@
+# Offline integration of production main with PR #3, which contains PR #1.
+# Branch history is not merged/pushed to main. ZERO access to API secrets.
+name: One-time offline integration of Vrchcab V2 rollout
+
+on:
+  push:
+    branches:
+      - diagnostics/offline-integrate-v2-20261107
+    paths:
+      - ".github/trigger_offline_integrate_v2_20261107.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run reviewed offline V2 rollout integration once'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_MAIN_SHA: f0da8ce7b3351f48115fdeb8394fcfb2e88c1341
+      EXPECTED_PR3_SHA: 432ff5bb2f5aee9144637641cc28d1c7b535fbfb
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      OPENAI_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      PERPLEXITY_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      METACULUS_PUBLICATION_BACKEND: github
+    steps:
+      - name: Checkout exact production main without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: f0da8ce7b3351f48115fdeb8394fcfb2e88c1341
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Integrate exact PR 3 code in runner only, never push
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          git fetch --no-tags origin "$EXPECTED_PR3_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_PR3_SHA"
+          git -c user.name="Vrchcab Offline Check" -c user.email="offline-check@users.noreply.github.com" merge --no-ff --no-edit "$EXPECTED_PR3_SHA"
+          test "$(git rev-parse HEAD^1)" = "$EXPECTED_MAIN_SHA"
+          test "$(git rev-parse HEAD^2)" = "$EXPECTED_PR3_SHA"
+          echo "Offline-only merge successful; no remote refs changed"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install pinned dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Verify all token references use V2 in publishing workflows
+        run: poetry run python -B tools/test_post_rotation_secret_isolation.py
+      - name: Run complete offline regression suite without API tokens
+        run: poetry run python -B -m tests.run --strict-known-bugs --report offline-v2-integration-results.json
