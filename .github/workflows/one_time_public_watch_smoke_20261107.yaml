@@ -6,14 +6,14 @@ on:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_one_authenticated_watch_smoke_20261107.txt"
+      - ".github/trigger_one_authenticated_watch_smoke_v2_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one V2-authenticated Metaculus GET-only watch smoke'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run revised exact-SDK-filter V2-authenticated GET smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 5325d0fffba6b227f639de2023a4b7e2f7f55c9e
+          ref: b9ff1544ed17e293444871d76d0e751456d570d5
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
