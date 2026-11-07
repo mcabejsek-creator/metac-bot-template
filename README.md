@@ -1,4 +1,13 @@
 # Simple Metaculus forecasting bot
+
+> **PUB-MODE-1 fixed: 273 offline tests pass.** Production's `91bf94b` prompt is
+> preserved. Follow the [audit and deployment/rollback plan](docs/deployment-readiness.md)
+> and the [SQLite v2 recovery requirements](docs/cross-mode-publication.md).
+> The [step-by-step rollout runbook](docs/rollout-runbook.md) includes real Python
+> 3.11 verification and an inactive offline-only Actions draft.
+> The original quick start below omits the durable-state cutover requirements;
+> complete the cutover prerequisites before deploying; Test Bot publishes real forecasts.
+
 This repository contains a simple bot meant to get you started with creating your own bot for the AI Forecasting Tournament. Go to https://www.metaculus.com/futureeval/participate/ for more info and tournament rules (and then go to the  "Getting Started" section of our [resources](https://www.metaculus.com/notebooks/38928/ai-benchmark-resources/#want-to-join-the-ai-forecasting-benchmark) page).
 
 **Brand new to this?** You can get a working bot running in about 5 minutes without writing a single line of code — just fork this repo, paste two API keys into GitHub, and click "Run workflow". See **[Quick start](#quick-start--fork-and-use-github-actions)** below.

@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 import dotenv
@@ -38,14 +38,19 @@ from forecasting_tools import (
     ReasonedPrediction,
     SmartSearcher,
     clean_indents,
-    structure_output,
 )
+
+from publication import SafePublicationMixin
+from runtime_limits import RuntimeLimitsMixin, cancellable_cli
+from research_safety import agent_research, validate_research_text
+from forecast_validation import ForecastValidationMixin, structure_output
+from question_context import TARGET_PERIOD_NOTE, QuestionContextMixin, effective_close, measurement_context, utc_date
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-class SummerTemplateBot2026(ForecastBot):
+class SummerTemplateBot2026(RuntimeLimitsMixin, QuestionContextMixin, ForecastValidationMixin, SafePublicationMixin, ForecastBot):
     """
     This is the template bot for Summer 2026 Metaculus AI Tournament.
     This is a copy of what is used by Metaculus to run the Metac Bots in our benchmark, provided as a template for new bot makers.
@@ -126,17 +131,19 @@ class SummerTemplateBot2026(ForecastBot):
     _max_concurrent_questions = (
         1  # Set this to whatever works for your search-provider/ai-model rate limits
     )
-    _concurrency_limiter = asyncio.Semaphore(_max_concurrent_questions)
     _structure_output_validation_samples = 2
 
     ##################################### RESEARCH #####################################
 
     async def run_research(self, question: MetaculusQuestion) -> str:
-        async with self._concurrency_limiter:
+        async with self._research_slot():
+            now = self._context_now()
+            metadata = measurement_context(question, now)
+            packet = self._question_context(question, now)
             research = ""
-            researcher = self.get_llm("researcher")
+            researcher = None if self._llms["researcher"] is None else self.get_llm("researcher")
 
-            prompt = clean_indents(
+            prompt = self._clean_prompt(
                 f"""
                 You are a research assistant to a highly skilled superforecaster.
                 The superforecaster will give you a question they intend to forecast on.
@@ -191,16 +198,18 @@ class SummerTemplateBot2026(ForecastBot):
                 {getattr(question, "options", None)}
                 Background information supplied by Metaculus:
                 {question.background_info}
+                {metadata}
+                {TARGET_PERIOD_NOTE}
                 Question timing and current state:
                 - Open time: {question.open_time}
                 - Close time: {self._get_effective_close_time(question)}
                 - Scheduled resolution time: {question.scheduled_resolution_time}
                 - Current forecasters: {question.num_forecasters}
                 - Current predictions: {question.num_predictions}
-- Today: {datetime.now(timezone.utc).date()}
-- Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
-- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}
-- Total open duration in days: {(self._get_effective_close_time(question).date() - question.open_time.date()).days if question.open_time and self._get_effective_close_time(question) else "unknown"}
+- Today: {now.date()}
+- Days since open: {(now.date() - utc_date(question.open_time).date()).days if question.open_time else "unknown"}
+- Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
+- Total open duration in days: {(self._get_effective_close_time(question).date() - utc_date(question.open_time).date()).days if question.open_time and self._get_effective_close_time(question) else "unknown"}
 Treat these timing values as authoritative. If "Days since open" is zero or positive, the question is already open and the current forecaster count is not pre-open data.
 Preserve the resolution formula exactly as written in the resolution criteria. Do not reinterpret a final total as an increase from the current value and do not invent a different denominator or numerator.
 When the resolution depends on the latest N polls, observations, reports, or other items from a specific source, verify that you have identified the full required set of N items from that source before reasoning about the current state. If necessary, include older items outside the current month or immediate time window rather than incorrectly treating the set as incomplete.
@@ -222,69 +231,20 @@ This question's outcome will be determined by the specific criteria below:
                 {question.resolution_criteria}
 
                 {question.fine_print}
-                """
+                """, question=question, values=(metadata,)
             )
 
             if isinstance(researcher, GeneralLlm):
                 research = await researcher.invoke(prompt)
 
             elif researcher == "perplexity-agent":
-                import json
-                import os
-                import urllib.request
+                research = await agent_research(self, prompt, phase="initial")
 
-                def call_perplexity_agent(agent_prompt):
-                    request = urllib.request.Request(
-                        "https://api.perplexity.ai/v1/agent",
-                        data=json.dumps(
-                            {
-                                "preset": "fast",
-                                "input": agent_prompt,
-                            }
-                        ).encode("utf-8"),
-                        headers={
-                            "Authorization": f"Bearer {os.environ['PERPLEXITY_API_KEY']}",
-                            "Content-Type": "application/json",
-                        },
-                        method="POST",
-                    )
-
-                    with urllib.request.urlopen(request, timeout=180) as response:
-                        data = json.loads(response.read().decode("utf-8"))
-
-                    answer_parts = []
-                    sources = []
-
-                    for item in data.get("output", []):
-                        if item.get("type") == "message":
-                            for content in item.get("content", []):
-                                if content.get("type") == "output_text":
-                                    answer_parts.append(content.get("text", ""))
-
-                        elif item.get("type") == "search_results":
-                            for result in item.get("results", []):
-                                title = result.get("title", "")
-                                url = result.get("url", "")
-                                if url:
-                                    sources.append(f"- {title}: {url}")
-
-                    research_text = "\n".join(answer_parts)
-
-                    if sources:
-                        research_text += "\n\nSources:\n" + "\n".join(sources)
-
-                    return research_text
-                research = await asyncio.to_thread(call_perplexity_agent, prompt)
-
-                fact_check_prompt = clean_indents(
+                fact_check_prompt = self._clean_prompt(
                     f"""
                     You are a meticulous fact-checker reviewing research for a forecasting question.
 
-                    Forecast question:
-                    {question.question_text}
-
-                    Resolution criteria:
-                    {question.resolution_criteria}
+                    {packet}
 
                     Original research:
                     {research}
@@ -309,20 +269,22 @@ This question's outcome will be determined by the specific criteria below:
 
                     Return a corrected, self-contained research report for the forecaster.
                     Do not discuss the fact-checking process itself and do not produce a forecast.
-                    """
+                    """, question=question, values=(packet, research)
                 )
 
-                research = await asyncio.to_thread(
-                    call_perplexity_agent,
-                    fact_check_prompt,
-                )
+                research = await agent_research(self, fact_check_prompt, phase="fact-check")
 
             elif not researcher or researcher == "None" or researcher == "no_research":
-                research = ""
+                logger.info("Research intentionally disabled for URL %s", question.page_url)
+                return ""
 
             else:
                 research = await self.get_llm("researcher", "llm").invoke(prompt)
 
+            research = validate_research_text(research)
+            if researcher != "perplexity-agent" and not getattr(self, "_research_text_only_warned", False):
+                logger.warning("Research model exposes text only: completion status unavailable; nonempty text validated")
+                self._research_text_only_warned = True
             logger.info(f"Found Research for URL {question.page_url}:\n{research}")
             return research
 
@@ -331,7 +293,9 @@ This question's outcome will be determined by the specific criteria below:
     async def _run_forecast_on_binary(
         self, question: BinaryQuestion, research: str
     ) -> ReasonedPrediction[float]:
-        prompt = clean_indents(
+        now = self._context_now()
+        metadata = measurement_context(question, now)
+        prompt = self._clean_prompt(
             f"""
             You are a professional forecaster interviewing for a job.
 
@@ -351,12 +315,13 @@ This question's outcome will be determined by the specific criteria below:
             Your research assistant says:
             {research}
 
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
+            {metadata}
+            Today is {now.strftime("%Y-%m-%d")}.
             Question timing from Metaculus (authoritative):
 - Close time: {self._get_effective_close_time(question)}
 - Scheduled resolution time: {question.scheduled_resolution_time}
-- Days until close: {(self._get_effective_close_time(question).date() - datetime.now(timezone.utc).date()).days if self._get_effective_close_time(question) else "unknown"}
-- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
+- Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
+- Days until scheduled resolution: {(utc_date(question.scheduled_resolution_time).date() - now.date()).days if question.scheduled_resolution_time else "unknown"}
 
 Treat these timing values as authoritative. Do not confuse the close time with the scheduled resolution time.
 The close time is only the deadline for submitting forecasts and is not evidence about whether the real-world outcome can still occur, unless the resolution criteria explicitly tie the outcome to the close time. Never use zero or expired days until close as evidence for Yes or No; assess the remaining opportunity using the scheduled resolution time or the actual deadline stated in the resolution criteria.
@@ -375,7 +340,7 @@ The close time is only the deadline for submitting forecasts and is not evidence
             {self._get_conditional_disclaimer_if_necessary(question)}
 
             The last thing you write is your final answer as: "Probability of YES: ZZ%", 0-100. This must always be the probability that the question resolves Yes, never the probability of No. If your reasoning estimates the probability of No, convert it to 100% minus that probability before giving the final answer.
-            """
+            """, question=question, values=(research, metadata)
         )
 
         return await self._binary_prompt_to_forecast(question, prompt)
@@ -392,6 +357,7 @@ The close time is only the deadline for submitting forecasts and is not evidence
             BinaryPrediction,
             model=self.get_llm("parser", "llm"),
             num_validation_samples=self._structure_output_validation_samples,
+            question=question,
         )
         decimal_pred = max(0.01, min(0.99, binary_prediction.prediction_in_decimal))
 
@@ -405,7 +371,9 @@ The close time is only the deadline for submitting forecasts and is not evidence
     async def _run_forecast_on_multiple_choice(
         self, question: MultipleChoiceQuestion, research: str
     ) -> ReasonedPrediction[PredictedOptionList]:
-        prompt = clean_indents(
+        now = self._context_now()
+        metadata = measurement_context(question, now)
+        prompt = self._clean_prompt(
             f"""
             You are a professional forecaster interviewing for a job.
 
@@ -431,14 +399,16 @@ Do not invent base rates, historical tendencies, polling patterns, endorsements,
 If the research says that a useful base rate or comparison is unavailable, treat it as unavailable.
 In elections and other competitive events, do not treat the current leader as a "status quo" outcome merely because they are currently ahead.
             When the research contains current event-specific forward-looking evidence such as announced or credibly reported plans, scheduled deployments, expected movements, betting odds, prediction markets, polls, rankings, named frontrunners, or comparable signals, give it substantial weight when forecasting the state at the future resolution date. Do not anchor primarily on the current observed state when credible evidence indicates that the state is expected to change before resolution. Lack of confirmation that the future transition has already occurred is not evidence against that transition; discount credible plans for uncertainty rather than ignoring them.            When the resolution criteria specify an exact time window, only count events that can occur within that window. Do not infer the number remaining in the resolution window by subtracting completed events from a broader-period total if some remaining events fall outside the window.
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
+            {metadata}
+            Today is {now.strftime("%Y-%m-%d")}.
 Question timing from Metaculus (authoritative):
-- Close time: {question.close_time}
+- Close time: {self._get_effective_close_time(question)}
 - Scheduled resolution time: {question.scheduled_resolution_time}
-- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
-- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
+- Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
+- Days until scheduled resolution: {(utc_date(question.scheduled_resolution_time).date() - now.date()).days if question.scheduled_resolution_time else "unknown"}
 
-Treat these timing values as authoritative. Do not calculate or infer a different remaining time horizon. The question may resolve earlier if its resolution criteria allow it, but never invent a later deadline.
+{TARGET_PERIOD_NOTE}
+Treat these timing values as authoritative. Do not infer the target period from the close time or the scheduled resolution time; use the question text, resolution criteria and fine print. The question may resolve earlier if its resolution criteria allow it, but never invent a later deadline.
             Before answering you write:
             (a) State the exact remaining days until scheduled resolution from the authoritative value above, and note if the resolution criteria allow the outcome to become known earlier.
             (b) Determine whether a literal status quo outcome is meaningful for this question. For a new discrete selection, election, award, or annual choice, do not treat the previous winner or previous year's category as the status quo unless the resolution criteria explicitly make the outcome persistent.
@@ -453,7 +423,7 @@ Treat these timing values as authoritative. Do not calculate or infer a differen
             Option_B: Probability_B
             ...
             Option_N: Probability_N
-            """
+            """, question=question, values=(research, metadata)
         )
         return await self._multiple_choice_prompt_to_forecast(question, prompt)
 
@@ -462,14 +432,14 @@ Treat these timing values as authoritative. Do not calculate or infer a differen
         question: MultipleChoiceQuestion,
         prompt: str,
     ) -> ReasonedPrediction[PredictedOptionList]:
-        parsing_instructions = clean_indents(
+        parsing_instructions = self._clean_prompt(
             f"""
             Make sure that all option names are one of the following:
             {question.options}
 
             The text you are parsing may prepend these options with some variation of "Option" which you should remove if not part of the option names I just gave you.
             Additionally, you may sometimes need to parse a 0% probability. Please do not skip options with 0% but rather make it an entry in your final list with 0% probability.
-            """
+            """, question=question, values=(str(question.options),)
         )
         reasoning = await self.get_llm("default", "llm").invoke(prompt)
         logger.info(f"Reasoning for URL {question.page_url}: {reasoning}")
@@ -479,6 +449,7 @@ Treat these timing values as authoritative. Do not calculate or infer a differen
             model=self.get_llm("parser", "llm"),
             num_validation_samples=self._structure_output_validation_samples,
             additional_instructions=parsing_instructions,
+            question=question,
         )
 
         logger.info(
@@ -493,10 +464,12 @@ Treat these timing values as authoritative. Do not calculate or infer a differen
     async def _run_forecast_on_numeric(
         self, question: NumericQuestion, research: str
     ) -> ReasonedPrediction[NumericDistribution]:
+        now = self._context_now()
+        metadata = measurement_context(question, now)
         upper_bound_message, lower_bound_message = (
             self._create_upper_and_lower_bound_messages(question)
         )
-        prompt = clean_indents(
+        prompt = self._clean_prompt(
             f"""
             You are a professional forecaster interviewing for a job.
 
@@ -515,18 +488,20 @@ Treat these timing values as authoritative. Do not calculate or infer a differen
             Your research assistant says:
             {research}
 
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
+            {metadata}
+            Today is {now.strftime("%Y-%m-%d")}.
             Question timing from Metaculus (authoritative):
 - Open time: {question.open_time}
-- Close time: {question.close_time}
+- Close time: {self._get_effective_close_time(question)}
 - Scheduled resolution time: {question.scheduled_resolution_time}
 - Current forecasters: {question.num_forecasters}
 - Current predictions: {question.num_predictions}
-- Days until close: {(question.close_time.date() - datetime.now(timezone.utc).date()).days if question.close_time else "unknown"}
-- Days until scheduled resolution: {(question.scheduled_resolution_time.date() - datetime.now(timezone.utc).date()).days if question.scheduled_resolution_time else "unknown"}
-- Days since open: {(datetime.now(timezone.utc).date() - question.open_time.date()).days if question.open_time else "unknown"}
+- Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
+- Days until scheduled resolution: {(utc_date(question.scheduled_resolution_time).date() - now.date()).days if question.scheduled_resolution_time else "unknown"}
+- Days since open: {(now.date() - utc_date(question.open_time).date()).days if question.open_time else "unknown"}
 The current forecaster count is observed AFTER the question opened. Do not describe it as pre-open data. "Days since open" is the elapsed participation period for the current count.
-- Total open duration in days: {(question.close_time.date() - question.open_time.date()).days if question.open_time and question.close_time else "unknown"}
+- Total open duration in days: {(self._get_effective_close_time(question).date() - utc_date(question.open_time).date()).days if question.open_time and self._get_effective_close_time(question) else "unknown"}
+{TARGET_PERIOD_NOTE}
 IMPORTANT: "Days until close" and "Days until scheduled resolution" above are the authoritative REMAINING time from today. Use those exact numbers. Do not confuse them with the question's total open duration. A figure such as 730 days may describe the TOTAL open duration and must NOT be used as the remaining time.
 Do not confuse the resolution metric with the current participation trend. Current forecasters divided by total open duration is only the final resolved value if no more forecasters join. If discussing the current arrival rate, use days since open, and do not extrapolate an early rate linearly unless justified by evidence.
             {lower_bound_message}
@@ -564,7 +539,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             Percentile 80: XX
             Percentile 90: XX (highest number value)
             "
-            """
+            """, question=question, values=(research, metadata)
         )
         return await self._numeric_prompt_to_forecast(question, prompt)
 
@@ -575,7 +550,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
     ) -> ReasonedPrediction[NumericDistribution]:
         reasoning = await self.get_llm("default", "llm").invoke(prompt)
         logger.info(f"Reasoning for URL {question.page_url}: {reasoning}")
-        parsing_instructions = clean_indents(
+        parsing_instructions = self._clean_prompt(
             f"""
             The text given to you is trying to give a forecast distribution for a numeric question.
             - This text is trying to answer the numeric question: "{question.question_text}".
@@ -587,7 +562,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             - If the answer doesn't give the answer in the correct units, you should parse it in the right units. For instance if the answer gives numbers as $500,000,000 and units are "B $" then you should parse the answer as 0.5 (since $500,000,000 is $0.5 billion).
             - If percentiles are not explicitly given (e.g. only a single value is given) please don't return a parsed output, but rather indicate that the answer is not explicitly given in the text.
             - Turn any values that are in scientific notation into regular numbers.
-            """
+            """, question=question
         )
         percentile_list: list[Percentile] = await structure_output(
             reasoning,
@@ -595,6 +570,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             model=self.get_llm("parser", "llm"),
             additional_instructions=parsing_instructions,
             num_validation_samples=self._structure_output_validation_samples,
+            question=question,
         )
         prediction = NumericDistribution.from_question(percentile_list, question)
         prediction.get_cdf()
@@ -608,10 +584,12 @@ For differences, margins, spreads, or leads between two percentages or proportio
     async def _run_forecast_on_date(
         self, question: DateQuestion, research: str
     ) -> ReasonedPrediction[NumericDistribution]:
+        now = self._context_now()
+        metadata = measurement_context(question, now)
         upper_bound_message, lower_bound_message = (
             self._create_upper_and_lower_bound_messages(question)
         )
-        prompt = clean_indents(
+        prompt = self._clean_prompt(
             f"""
             You are a professional forecaster interviewing for a job.
 
@@ -628,7 +606,15 @@ For differences, margins, spreads, or leads between two percentages or proportio
             Your research assistant says:
             {research}
 
-            Today is {datetime.now().strftime("%Y-%m-%d")}.
+            {metadata}
+            Today is {now.strftime("%Y-%m-%d")}.
+            Question timing from Metaculus (authoritative):
+- Open time: {question.open_time}
+- Close time: {self._get_effective_close_time(question)}
+- Scheduled resolution time: {question.scheduled_resolution_time}
+- Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
+- Days until scheduled resolution: {(utc_date(question.scheduled_resolution_time).date() - now.date()).days if question.scheduled_resolution_time else "unknown"}
+{TARGET_PERIOD_NOTE}
 
             {lower_bound_message}
             {upper_bound_message}
@@ -658,7 +644,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             Percentile 80: YYYY-MM-DD
             Percentile 90: YYYY-MM-DD (newest date)
             "
-            """
+            """, question=question, values=(research, metadata)
         )
         forecast = await self._date_prompt_to_forecast(question, prompt)
         return forecast
@@ -670,14 +656,14 @@ For differences, margins, spreads, or leads between two percentages or proportio
     ) -> ReasonedPrediction[NumericDistribution]:
         reasoning = await self.get_llm("default", "llm").invoke(prompt)
         logger.info(f"Reasoning for URL {question.page_url}: {reasoning}")
-        parsing_instructions = clean_indents(
+        parsing_instructions = self._clean_prompt(
             f"""
             The text given to you is trying to give a forecast distribution for a date question.
             - This text is trying to answer the question: "{question.question_text}".
             - As an example, someone else guessed that the answer will be between {question.lower_bound} and {question.upper_bound}, so the numbers parsed from an answer like this would be verbatim "{question.lower_bound}" and "{question.upper_bound}".
             - The output is given as dates/times please format it into a valid datetime parsable string. Assume midnight UTC if no hour is given.
             - If percentiles are not explicitly given (e.g. only a single value is given) please don't return a parsed output, but rather indicate that the answer is not explicitly given in the text.
-            """
+            """, question=question
         )
         date_percentile_list: list[DatePercentile] = await structure_output(
             reasoning,
@@ -685,6 +671,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             model=self.get_llm("parser", "llm"),
             additional_instructions=parsing_instructions,
             num_validation_samples=self._structure_output_validation_samples,
+            question=question,
         )
 
         percentile_list = [
@@ -702,27 +689,24 @@ For differences, margins, spreads, or leads between two percentages or proportio
     def _get_effective_close_time(
         self, question: MetaculusQuestion
     ) -> datetime | None:
-        actual_close_raw = question.api_json.get("question", {}).get("actual_close_time")
-        if actual_close_raw is not None:
-            return question._parse_api_date(actual_close_raw)
-        return question.close_time
+        return effective_close(question)
 
     def _create_upper_and_lower_bound_messages(
         self, question: NumericQuestion | DateQuestion
     ) -> tuple[str, str]:
         if isinstance(question, NumericQuestion):
-            if question.nominal_upper_bound is not None:
+            if question.open_upper_bound and question.nominal_upper_bound is not None:
                 upper_bound_number = question.nominal_upper_bound
             else:
                 upper_bound_number = question.upper_bound
-            if question.nominal_lower_bound is not None:
+            if question.open_lower_bound and question.nominal_lower_bound is not None:
                 lower_bound_number = question.nominal_lower_bound
             else:
                 lower_bound_number = question.lower_bound
             unit_of_measure = question.unit_of_measure
         elif isinstance(question, DateQuestion):
-            upper_bound_number = question.upper_bound.date().isoformat()
-            lower_bound_number = question.lower_bound.date().isoformat()
+            upper_bound_number = utc_date(question.upper_bound).isoformat()
+            lower_bound_number = utc_date(question.lower_bound).isoformat()
             unit_of_measure = ""
         else:
             raise ValueError()
@@ -743,11 +727,14 @@ For differences, margins, spreads, or leads between two percentages or proportio
     async def _run_forecast_on_conditional(
         self, question: ConditionalQuestion, research: str
     ) -> ReasonedPrediction[ConditionalPrediction]:
+        # SDK branch templates reformat parent/child prose; carry their exact
+        # original contracts alongside the evidence through every branch.
+        research = research + "\n\n" + self._question_context(question)
         parent_info, full_research = await self._get_question_prediction_info(
             question.parent, research, "parent"
         )
         child_info, full_research = await self._get_question_prediction_info(
-            question.child, research, "child"
+            question.child, full_research, "child"
         )
         yes_info, full_research = await self._get_question_prediction_info(
             question.question_yes, full_research, "yes"
@@ -755,7 +742,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
         no_info, full_research = await self._get_question_prediction_info(
             question.question_no, full_research, "no"
         )
-        full_reasoning = clean_indents(
+        full_reasoning = self._clean_prompt(
             f"""
             ## Parent Question Reasoning
             {parent_info.reasoning}
@@ -765,7 +752,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             {yes_info.reasoning}
             ## No Question Reasoning
             {no_info.reasoning}
-        """
+        """, values=(parent_info.reasoning, child_info.reasoning, yes_info.reasoning, no_info.reasoning)
         )
         full_prediction = ConditionalPrediction(
             parent=parent_info.prediction_value,  # type: ignore
@@ -790,7 +777,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
         ):
             # TODO: add option to not affirm current parent/child forecasts, create new forecast
             previous_forecast = previous_forecasts[-1]
-            current_utc_time = datetime.now(timezone.utc)
+            current_utc_time = self._context_now()
             if (
                 previous_forecast.timestamp_end is None
                 or previous_forecast.timestamp_end > current_utc_time
@@ -800,7 +787,8 @@ For differences, margins, spreads, or leads between two percentages or proportio
                     prediction_value=PredictionAffirmed(),
                     reasoning=f"Already existing forecast reaffirmed at {pretty_value}.",
                 )
-                return (prediction, research)  # type: ignore
+                context_info = ReasonedPrediction(prediction_value=previous_forecast, reasoning=prediction.reasoning)
+                return prediction, self._add_reasoning_to_research(research, context_info, question_type)  # type: ignore
         info = await self._make_prediction(question, research)
         full_research = self._add_reasoning_to_research(research, info, question_type)
         return info, full_research  # type: ignore
@@ -814,7 +802,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
         from forecasting_tools.data_models.data_organizer import DataOrganizer
 
         question_type = question_type.title()
-        return clean_indents(
+        return self._clean_prompt(
             f"""
             {research}
             ---
@@ -826,7 +814,7 @@ For differences, margins, spreads, or leads between two percentages or proportio
             {reasoning.reasoning}
             ```
             This is absolutely essential: do NOT use this reasoning to re-forecast the {question_type} question.
-            """
+            """, values=(research, reasoning.reasoning)
         )
 
     def _get_conditional_disclaimer_if_necessary(
@@ -840,6 +828,23 @@ For differences, margins, spreads, or leads between two percentages or proportio
             You never re-forecast the parent question under any circumstances, but you use probabilistic reasoning, strongly considering the parent question's resolution, to forecast the child question.
             """
         )
+
+
+async def forecast_for_mode(template_bot, run_mode):
+    """One run budget and event loop, including retrieval and both tournaments."""
+    async with template_bot.run_budget():
+        client = MetaculusClient()
+        if run_mode == "tournament":
+            seasonal = await template_bot.forecast_on_tournament(33121, return_exceptions=True)
+            minibench = await template_bot.forecast_on_tournament(client.CURRENT_MINIBENCH_ID, return_exceptions=True)
+            return seasonal + minibench
+        if run_mode == "metaculus_cup":
+            template_bot.skip_previously_forecasted_questions = False
+            return await template_bot.forecast_on_tournament(client.CURRENT_METACULUS_CUP_ID, return_exceptions=True)
+        if run_mode == "test_questions":
+            template_bot.skip_previously_forecasted_questions = False
+            return await template_bot.forecast_on_tournament("bot-testing-area", return_exceptions=True)
+        raise ValueError("Unknown run mode")
 
 
 if __name__ == "__main__":
@@ -896,42 +901,7 @@ predictions_per_research_report=3,
         "test_questions": "https://www.metaculus.com/tournament/bot-testing-area/",
     }
 
-    # Dispatch on mode. Each branch produces a list of ForecastReport (or
-    # exceptions, since return_exceptions=True) which then flows into the
-    # summary printers below.
-    client = MetaculusClient()
-    if run_mode == "tournament":
-        seasonal_tournament_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                33121, return_exceptions=True
-            )
-        )
-        minibench_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                client.CURRENT_MINIBENCH_ID, return_exceptions=True
-            )
-        )
-        forecast_reports = seasonal_tournament_reports + minibench_reports
-    elif run_mode == "metaculus_cup":
-        # The Metaculus Cup may be uninitialized near the start of a season
-        # (Jan/May/Sep). AXC_2025_TOURNAMENT_ID = 32564 and
-        # AI_2027_TOURNAMENT_ID = "ai-2027" are also valid targets here.
-        template_bot.skip_previously_forecasted_questions = False
-        forecast_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                client.CURRENT_METACULUS_CUP_ID, return_exceptions=True
-            )
-        )
-    elif run_mode == "test_questions":
-        # The bot-testing-area tournament contains all question types and is
-        # the recommended target for smoke-testing your bot.
-        # https://www.metaculus.com/tournament/bot-testing-area/
-        template_bot.skip_previously_forecasted_questions = False
-        forecast_reports = asyncio.run(
-            template_bot.forecast_on_tournament(
-                "bot-testing-area", return_exceptions=True
-            )
-        )
+    forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(template_bot, run_mode)))
 
     template_bot.log_report_summary(forecast_reports)
     print_run_summary_banner(
