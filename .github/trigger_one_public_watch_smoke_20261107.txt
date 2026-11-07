@@ -1,0 +1,1 @@
+One public no-token two-GET Metaculus smoke for FutureEval 33121 and MiniBench. Zero forecast submissions, no model calls, no access to private forecast history.
