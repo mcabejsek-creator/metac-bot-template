@@ -1,0 +1,35 @@
+# ONE user-authorized request (2026-11-07): GET /api/users/me/ only.
+# No schedule, workflow_dispatch, forecast publishing, token changes, or retries.
+name: One-time identify Metaculus token owner (canonical endpoint)
+
+on:
+  push:
+    branches:
+      - diagnostics/open-questions-offline-20261107
+    paths:
+      - ".github/trigger_identity_canonical_20261107.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one approved Metaculus identity GET at canonical URL'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout immutable reviewed identity code
+        uses: actions/checkout@v4
+        with:
+          ref: 3fccfec64bfa7de0b44db3e60a79301f275c78a6
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify GET request shape without networking
+        run: python -B tools/check_existing_metaculus_token_owner_readonly.py --self-check
+      - name: Single authenticated GET using existing secret
+        run: python -B tools/check_existing_metaculus_token_owner_readonly.py --run-one-authorized-get
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
