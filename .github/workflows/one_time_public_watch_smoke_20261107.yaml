@@ -1,19 +1,19 @@
-# One-time PUBLIC read-only check. No account or LLM secrets. Removed after use.
-name: Single-shot public FutureEval and MiniBench GET smoke
+# One-time authenticated GET-only read, using V2 secret only for Metaculus reads.
+name: Single-shot V2-authenticated FutureEval and MiniBench GET smoke
 
 on:
   push:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_one_public_watch_smoke_20261107.txt"
+      - ".github/trigger_one_authenticated_watch_smoke_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one token-free public Metaculus watch smoke'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one V2-authenticated Metaculus GET-only watch smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,12 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: df007392c50a8b405add17eb684a7282629604a3
+          ref: 5325d0fffba6b227f639de2023a4b7e2f7f55c9e
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Run offline schema tests, no network
         run: python -B tools/test_watch_open_metaculus_questions_readonly.py
-      - name: Check currently open public posts with exactly two GETs
+      - name: Check currently open posts with V2 auth, exactly two GETs
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
         run: python -B tools/watch_open_metaculus_questions_readonly.py --check-public-open-posts
