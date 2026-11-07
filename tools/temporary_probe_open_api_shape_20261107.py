@@ -9,6 +9,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 from watch_open_metaculus_questions_readonly import (
     TARGETS, MAX_BODY_BYTES, NoRedirect, make_request, normalized_token
@@ -64,7 +65,6 @@ def inspect():
         req = make_request(project, token)
         # Bounded one-off: explicitly request second page at offset 100,
         # never follow server-provided URLs or redirect.
-        import urllib.parse
         parsed_req = urllib.parse.urlsplit(req.full_url)
         params = [(k, ("100" if k == "offset" else v)) for k, v in urllib.parse.parse_qsl(parsed_req.query)]
         new_url = urllib.parse.urlunsplit((parsed_req.scheme, parsed_req.netloc, parsed_req.path,
