@@ -6,14 +6,14 @@ on:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_one_authenticated_watch_smoke_v2_20261107.txt"
+      - ".github/trigger_one_aggregate_api_shape_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run revised exact-SDK-filter V2-authenticated GET smoke'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one aggregate-only V2-authenticated Metaculus response-shape probe'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,14 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: b9ff1544ed17e293444871d76d0e751456d570d5
+          ref: 449b768ad65de6ac0ba3976d14d858a8b0c2776c
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Run offline schema tests, no network
         run: python -B tools/test_watch_open_metaculus_questions_readonly.py
-      - name: Check currently open posts with V2 auth, exactly two GETs
+      - name: Inspect only response shape and status counts with V2 auth; two GETs
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
-        run: python -B tools/watch_open_metaculus_questions_readonly.py --check-public-open-posts
+        run: python -B tools/temporary_probe_open_api_shape_20261107.py
