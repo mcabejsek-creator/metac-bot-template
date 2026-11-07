@@ -1,0 +1,69 @@
+name: Offline integration check (main + PR 1)
+
+# One-off, manually run CI for two exact immutable commits.
+# No Metaculus or model API secrets; no publishing and no push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not lock or interrupt the separate publication workflows.
+concurrency:
+  group: offline-integration-check-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      EXPECTED_MAIN_SHA: 277d7bde6bee8514c393c09997fb853ca2e83828
+      EXPECTED_PR_SHA: 561f53f70a595e0ada1352f5f3fd3f8c2d61e90c
+      METACULUS_PUBLICATION_BACKEND: github
+    steps:
+      - name: Check out pinned main revision
+        uses: actions/checkout@v4
+        with:
+          ref: 277d7bde6bee8514c393c09997fb853ca2e83828
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge the exact PR revision in this temporary runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          git fetch --no-tags origin "$EXPECTED_PR_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_PR_SHA"
+          git -c user.name="Offline Integration Check" \
+              -c user.email="offline-check@users.noreply.github.com" \
+              merge --no-ff --no-edit "$EXPECTED_PR_SHA"
+          test "$(git rev-parse HEAD^1)" = "$EXPECTED_MAIN_SHA"
+          test "$(git rev-parse HEAD^2)" = "$EXPECTED_PR_SHA"
+          echo "Local integration commit (never pushed): $(git rev-parse HEAD)"
+          echo "Integrated source tree: $(git rev-parse HEAD^{tree})"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install locked dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Verify offline integrated regressions
+        run: poetry run python -B -m tests.run --strict-known-bugs --report offline-integration-results.json
+
+      - name: Save nonsecret test summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-integration-results
+          path: offline-integration-results.json
+          if-no-files-found: warn
+          retention-days: 30
