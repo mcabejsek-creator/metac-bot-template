@@ -207,6 +207,37 @@ class PinnedSDKCompatibilityTests(unittest.TestCase):
         self.assertEqual(result[0].id_of_question, 9992)
         self.assertFalse(result[0].already_forecasted)
 
+    def test_pinned_sdk_unpacks_group_post_subquestions(self):
+        from forecasting_tools import MetaculusClient
+        def child(qid):
+            return {
+                "id": qid, "title": "Synthetic group subquestion",
+                "type": "binary", "status": "open",
+                "open_time": "2026-11-01T00:00:00Z",
+                "scheduled_close_time": "2026-11-10T00:00:00Z",
+                "my_forecasts": {"history": [], "latest": None},
+            }
+        raw = {
+            "id": 9871,
+            "group_of_questions": {
+                "questions": [child(9872), child(9873)],
+                "fine_print": "Synthetic only",
+                "description": "Synthetic only",
+                "resolution_criteria": "Synthetic only",
+            },
+            "projects": {
+                "tournament": [{"slug": "fall-futureeval-2026"}],
+                "default_project": {"id": 33121, "visibility": "normal"},
+                "category": [],
+            },
+        }
+        client = MetaculusClient(token="synthetic-offline-only")
+        result = scan_open_tournament(
+            client, 33121, read_page=lambda *_: ([raw], False), now=NOW,
+        )
+        self.assertEqual([q.id_of_question for q in result], [9872, 9873])
+        self.assertTrue(all(q.already_forecasted is False for q in result))
+
 
 class FakeResponse:
     status = 200
