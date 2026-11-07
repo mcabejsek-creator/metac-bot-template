@@ -1,0 +1,1 @@
+Safe final offline combination: main + PR3 exact SHA, no secret access, no live forecast calls, no merge into main.
