@@ -73,3 +73,15 @@ API v každé z 171 otázek s předpovědí vrátilo právě jeden historický z
 5. Teprve s novým explicitním souhlasem provést merge, inicializaci žurnálu, jeden kontrolovaný produkční běh a pozdější obnovení cron-job.org.
 
 Žádné nové publikování zde nebylo povoleno.
+
+## Offline integrace oprav s novým tokenem (7. 11. 2026)
+
+Na oddělené diagnostické větvi byla po čistě lokálním merge ve **virtuálním GitHub runneru** integrována produkční `main` (`f0da8ce7b3351f48115fdeb8394fcfb2e88c1341`) s návrhem PR #3 (`7af78705f4833c3106221b988abed7c18759fdf6`), který zahrnuje celý opravný PR #1 a izolaci `METACULUS_TOKEN_V2`. Nebyl proveden žádný push/merge do produkční `main`.
+
+- První offline integrace [42373366225](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42373366225) selhala jedině proto, že původní regresní test v `tests/test_github_workflows.py` stále očekával staré GitHub secret `METACULUS_TOKEN`; nikoli kvůli selhání botovy logiky.
+- Očekávání v testu bylo opraveno v návrhové větvi PR #3 (commit `7af78705f4833c3106221b988abed7c18759fdf6`), spolu s kontrolou, že se nepoužije starý secret.
+- Opakovaný [offline integrační běh 42373534086](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42373534086) byl úspěšný: **4/4 token isolation tests, 273/273 offline regressions, 0 unexpected live attempts**.
+- Runner neměl `METACULUS_TOKEN`, `METACULUS_TOKEN_V2` ani LLM API tajemství. Jednorázový spouštěč byl po použití odstraněn.
+- Production `main`, stavové úložiště `metaculus-publication-state`, první ostrý publish a cron-job.org nebyly změněny.
+
+**Význam:** Technická kompatibilita balíku oprav a rotace přístupových údajů je podložena offline testy. **Nejde** o samostatný důkaz, že všechny staré pokusy byly rekonciliovány. Potřebujeme separátní výslovné schválení před produkčním merge, journal init a jakýmkoli živým odesláním předpovědí.
