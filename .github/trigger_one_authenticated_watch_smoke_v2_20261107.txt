@@ -1,0 +1,1 @@
+Exactly two read-only V2-token-authenticated Metaculus GET calls with revised SDK-matching filters. No forecast/model/publication writes.
