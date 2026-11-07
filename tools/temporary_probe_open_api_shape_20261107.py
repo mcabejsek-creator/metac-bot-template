@@ -22,6 +22,39 @@ def classify(value):
     return "missing"
 
 
+
+def next_parts(value):
+    import urllib.parse
+    if not isinstance(value, str) or not value:
+        return None
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme not in ("", "https") or parsed.netloc not in ("", "www.metaculus.com"):
+        raise RuntimeError("Unexpected next link origin; stop")
+    if parsed.path != "/api/posts/":
+        raise RuntimeError("Unexpected next link path; stop")
+    return urllib.parse.parse_qs(parsed.query)
+
+
+def next_offset(value):
+    parts = next_parts(value)
+    if parts is None:
+        return None
+    try:
+        return int(parts.get("offset", ["0"])[0])
+    except ValueError:
+        raise RuntimeError("Bad next offset") from None
+
+
+def next_query_keys(value):
+    parts = next_parts(value)
+    return sorted(parts.keys()) if parts is not None else []
+
+
+def next_preserves_target(value, project):
+    parts = next_parts(value)
+    return parts is not None and parts.get("tournaments") == [project] and parts.get("statuses") == ["open"]
+
+
 def inspect():
     token = normalized_token(os.getenv("METACULUS_TOKEN", ""))
     opener = urllib.request.build_opener(NoRedirect())
@@ -63,6 +96,9 @@ def inspect():
             "next_type": type(parsed.get("next")).__name__,
             "next_truthy": bool(parsed.get("next")),
             "next_empty_string": parsed.get("next") == "",
+            "next_offset": next_offset(parsed.get("next")),
+            "next_query_keys": next_query_keys(parsed.get("next")),
+            "next_preserves_target": next_preserves_target(parsed.get("next"), project),
             "outer_status_counts": dict(outer_statuses),
             "question_status_counts": dict(inner_statuses),
             "question_state_counts": dict(inner_states),
