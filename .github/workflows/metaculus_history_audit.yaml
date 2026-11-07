@@ -25,7 +25,7 @@ jobs:
           python-version: "3.11"
       - name: Read only own forecast inventory
         env:
-          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
         run: |
           python -B tools/audit_metaculus_history.py \
             --user-id 307558 \

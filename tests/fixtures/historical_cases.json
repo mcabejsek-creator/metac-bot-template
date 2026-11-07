@@ -1,0 +1,146 @@
+{
+  "_provenance": "Synthetic reconstructions of scenarios in prompt codex vlakno.docx (handover dated 2026-11-06). Not original API records, live facts, resolved outcomes, or calibration targets. Criteria below are local test contracts, not verbatim historical Metaculus criteria. Community forecasts are deliberately excluded.",
+  "japanese_diet": {
+    "source": "Handover sections 7 and 10: close=0 is not the event deadline.",
+    "question": {
+      "kind": "binary", "question_text": "Will a seat-reduction bill pass before the specified year-end deadline?",
+      "resolution_criteria": "Resolve Yes if the bill passes by 2026-12-31T23:59:59Z. Forecast submission closing is not the event deadline.",
+      "fine_print": "No separate formal public announcement is required.",
+      "background_info": "Synthetic legislature fixture; political support alone does not resolve the question.",
+      "open_time": "2026-09-06T00:00:00Z", "close_time": "2026-11-06T23:00:00Z",
+      "scheduled_resolution_time": "2026-12-31T23:59:59Z",
+      "already_forecasted": false, "id_of_question": 900001, "id_of_post": 900001
+    },
+    "expected": {"days_until_close": 0, "days_until_resolution": 55}
+  },
+  "gpr": {
+    "source": "Handover sections 7 and 10: GPR close=0, resolution in 33 days.",
+    "question": {
+      "kind": "numeric", "question_text": "What will the exact GPR index value be at the deadline?",
+      "resolution_criteria": "Use the named GPR series for 2026-12-09, not a regional proxy index.",
+      "fine_print": "The forecast closing date is not the measurement date.",
+      "background_info": "Synthetic GPR timing fixture.", "unit_of_measure": "index points",
+      "open_time": "2026-09-06T00:00:00Z", "close_time": "2026-11-06T23:00:00Z",
+      "scheduled_resolution_time": "2026-12-09T23:59:59Z",
+      "lower_bound": 0, "upper_bound": 500, "open_lower_bound": false, "open_upper_bound": true
+    },
+    "expected": {"days_until_close": 0, "days_until_resolution": 33}
+  },
+  "fda": {
+    "source": "Handover sections 6.4 and 10: deramiocel/FDA answer-option awareness.",
+    "question": {
+      "kind": "multiple_choice", "question_text": "Which specified FDA outcome occurs by the deadline?",
+      "options": ["FDA Approval", "New complete response / CRL", "Neither"],
+      "resolution_criteria": "Select FDA Approval for approval, New complete response / CRL for a new complete response letter, or Neither if neither occurs within the window.",
+      "fine_print": "An advisory recommendation is not approval. Apply only these three outcomes.",
+      "background_info": "Synthetic regulatory fixture with three mutually exclusive options.",
+      "open_time": "2026-09-06T00:00:00Z", "close_time": "2026-11-06T23:00:00Z",
+      "scheduled_resolution_time": "2026-12-09T23:59:59Z"
+    },
+    "expected": {"days_until_close": 0, "days_until_resolution": 33}
+  },
+  "cbo": {
+    "source": "Handover sections 6.2 and 10: FY2027/FY2028 table pairing.",
+    "question": {
+      "kind": "numeric", "question_text": "What projected federal outlays does the specified CBO table give for FY2028?",
+      "resolution_criteria": "Use projected federal outlays for FY2028 in trillion USD from the specified table. Do not use FY2027 or a different metric.",
+      "fine_print": "Values are projections, not observed outlays. Keep each fiscal year paired with its own row.",
+      "background_info": "Local table: FY2027 projected outlays = 7.772 trillion USD; FY2028 projected outlays = 8.151 trillion USD.",
+      "unit_of_measure": "trillion USD", "lower_bound": 5, "upper_bound": 12,
+      "open_lower_bound": true, "open_upper_bound": true
+    },
+    "expected": {"target_year": 2028, "target_value": 8.151, "adjacent_year": 2027, "adjacent_value": 7.772}
+  },
+  "forecasters": {
+    "source": "Handover section 8.2: tests #18 and #43; 180/730 is a guaranteed minimum, not an arrival rate.",
+    "question": {
+      "kind": "numeric", "question_text": "What will final unique forecasters divided by total open days be?",
+      "resolution_criteria": "Divide final unique forecasters by the total 730 open days. The count cannot decrease.",
+      "fine_print": "No downward revisions to the unique forecaster count are allowed in this synthetic fixture.",
+      "background_info": "Current unique forecasters: 180. Current predictions: 375. The fixed denominator is 730; the current guaranteed minimum is 180/730, approximately 0.2465753425.",
+      "num_forecasters": 180, "num_predictions": 375,
+      "open_time": "2026-09-06T00:00:00Z", "close_time": "2028-09-05T00:00:00Z",
+      "scheduled_resolution_time": "2028-09-06T00:00:00Z",
+      "unit_of_measure": "forecasters per total open day", "lower_bound": 0, "upper_bound": 5,
+      "open_lower_bound": false, "open_upper_bound": true
+    },
+    "expected": {"days_since_open": 61, "total_open_days": 730, "hard_lower_bound": 0.2465753424657534}
+  },
+  "vvix_maximum": {
+    "source": "Handover sections 6.9, 8.1 and 10: maximum over comparable two-week windows; semantic effect unverified historically.",
+    "question": {
+      "kind": "numeric", "question_text": "What is the maximum intraday VVIX over the specified two-week window?",
+      "resolution_criteria": "Use the maximum intraday VVIX from 2026-11-01 through 2026-11-14 inclusive, not closing values or the average.",
+      "fine_print": "A qualifying value of 115 has already occurred inside this window. Historical maxima are benchmarks, not additional hard limits.",
+      "background_info": "Synthetic realized window values: 101, 115, 109. Historical comparison windows must have the same length.",
+      "unit_of_measure": "index points", "lower_bound": 0, "upper_bound": 300,
+      "open_lower_bound": false, "open_upper_bound": true
+    },
+    "expected": {"hard_lower_bound": 115, "window_days": 14}
+  },
+  "window_minimum": {
+    "source": "Synthetic companion to handover section 8.1 minimum-window rule.",
+    "question": {
+      "kind": "numeric", "question_text": "What is the minimum observed value in the specified window?",
+      "resolution_criteria": "Use the minimum qualifying value in the fixed window; do not use the final value.",
+      "fine_print": "A qualifying value of 90 has already been observed in the window.",
+      "background_info": "Synthetic realized window values: 110, 90, 100.",
+      "unit_of_measure": "index points", "lower_bound": 0, "upper_bound": 200,
+      "open_lower_bound": false, "open_upper_bound": false
+    },
+    "expected": {"hard_upper_bound": 90}
+  },
+  "unesco": {
+    "source": "Handover section 10: current value 563 is a baseline, not automatically a hard bound.",
+    "question": {
+      "kind": "numeric", "question_text": "How many eligible items will the tracker list at the deadline?",
+      "resolution_criteria": "Use the tracker category count at the deadline; items may be removed or reclassified.",
+      "fine_print": "The current 563 eligible items do not establish a hard lower bound.",
+      "background_info": "Synthetic current count: 563. Both additions and removals are possible.",
+      "unit_of_measure": "items", "lower_bound": 0, "upper_bound": 1000,
+      "open_lower_bound": false, "open_upper_bound": true
+    },
+    "expected": {"baseline": 563, "hard_lower_bound": 0}
+  },
+  "percentage": {
+    "source": "Handover section 8.1: proportions are bounded by 0–100 percent.",
+    "question": {
+      "kind": "numeric", "question_text": "What percentage of a fixed eligible population participates?",
+      "resolution_criteria": "100 times participants divided by the fixed eligible population, not percentage growth.",
+      "fine_print": "Count each eligible person at most once.", "unit_of_measure": "%",
+      "lower_bound": 0, "upper_bound": 100, "open_lower_bound": false, "open_upper_bound": false
+    },
+    "expected": {"hard_lower_bound": 0, "hard_upper_bound": 100}
+  },
+  "percentage_difference": {
+    "source": "Handover section 8.1: difference of percentages is bounded by -100..100 pp.",
+    "question": {
+      "kind": "numeric", "question_text": "What is percentage A minus percentage B?",
+      "resolution_criteria": "Subtract B from A in percentage points, not relative percent change or the raw A value.",
+      "fine_print": "Each input is a proportion expressed from 0 to 100 percent.", "unit_of_measure": "percentage points",
+      "lower_bound": -100, "upper_bound": 100, "open_lower_bound": false, "open_upper_bound": false
+    },
+    "expected": {"hard_lower_bound": -100, "hard_upper_bound": 100}
+  },
+  "lake_mead": {
+    "source": "Handover sections 6.7 and 10: distinguish observed series values and official projections.",
+    "question": {
+      "kind": "numeric", "question_text": "What will the specified Lake Mead elevation series show at November month-end?",
+      "resolution_criteria": "Use the named Bureau of Reclamation elevation series in feet, not storage volume.",
+      "fine_print": "An official future projection is not an observed benchmark.",
+      "background_info": "Local fixture: October month-end observed elevation 1038.85 ft; current observed elevation 1039.2 ft; official November projected elevation 1033.97 ft.",
+      "unit_of_measure": "ft", "lower_bound": 900, "upper_bound": 1200,
+      "open_lower_bound": true, "open_upper_bound": true
+    }
+  },
+  "date": {
+    "source": "Synthetic date companion; handover section 13.5 says date prompt is less developed.",
+    "question": {
+      "kind": "date", "question_text": "When will the precisely defined release occur?",
+      "resolution_criteria": "Use the first public release date, not a private preview or announcement.",
+      "fine_print": "A private demonstration does not qualify.",
+      "lower_bound": "2026-11-01T00:00:00Z", "upper_bound": "2028-01-01T00:00:00Z",
+      "open_lower_bound": false, "open_upper_bound": true
+    }
+  }
+}

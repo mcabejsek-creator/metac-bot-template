@@ -3,20 +3,32 @@ name: Forecast on Metaculus Cup
 on:
   workflow_dispatch:
 
-# Add concurrency group to prevent parallel runs
+permissions:
+  contents: write
+
+env:
+  METACULUS_PUBLICATION_BACKEND: github
+  METACULUS_PUBLICATION_STATE_BRANCH: metaculus-publication-state
+  METACULUS_PUBLICATION_STATE_PATH: publication.enc
+  METACULUS_PUBLICATION_SCOPE: default-bot
+
+# Reforecasts are intentional per run; concurrent writes still share one lock.
 concurrency:
-  group: ${{ github.workflow }}
+  group: metaculus-publication-${{ github.repository }}
   cancel-in-progress: false
 
 
 # Daily job to run the simple forecast bot
 jobs:
   forecast_job:
+    timeout-minutes: 210 # Setup/tests + 180-minute supervised bot + shutdown margin.
     runs-on: ubuntu-latest # determines the machine that will run the job - keep as is
     steps: # sets up the steps that will be run in order
       # setup repository with all necessary dependencies - keep as is
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -28,13 +40,16 @@ jobs:
           installer-parallel: true
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
+      - name: Offline publication regressions
+        run: poetry run python -B -m tests.run
       - name: Run bot
         run: |
-          poetry run python main.py --mode metaculus_cup
+          poetry run python -B -m bounded_run -- python main.py --mode metaculus_cup
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:
-          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }} # replace this with the name of the variable under which you stored your own Metaculus token
+          GITHUB_TOKEN: ${{ github.token }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }} # replace this with the name of the variable under which you stored your own Metaculus token
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
