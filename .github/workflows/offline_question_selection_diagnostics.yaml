@@ -10,6 +10,7 @@ on:
       - "tools/check_bulk_read_method_offline.py"
       - "tools/project_history_inventory_readonly.py"
       - "tools/test_project_history_inventory_offline.py"
+      - "tools/check_existing_metaculus_token_owner_readonly.py"
       - ".github/workflows/offline_question_selection_diagnostics.yaml"
 
 permissions:
@@ -54,3 +55,5 @@ jobs:
         run: poetry run python -B tools/project_history_inventory_readonly.py --self-check
       - name: Test inventory response validation and fail-closed HTTP 429 (offline)
         run: poetry run python -B tools/test_project_history_inventory_offline.py
+      - name: Verify canonical token owner endpoint without network or credentials
+        run: poetry run python -B tools/check_existing_metaculus_token_owner_readonly.py --self-check
