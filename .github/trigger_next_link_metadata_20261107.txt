@@ -1,0 +1,1 @@
+One-only two V2-authenticated GETs to inspect pagination offset, query-key names, project/status preservation; no raw link or private data output.
