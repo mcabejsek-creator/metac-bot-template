@@ -1,1 +1,0 @@
-Read only offset 100, at most one authenticated GET per FutureEval and MiniBench, aggregate counts only.
