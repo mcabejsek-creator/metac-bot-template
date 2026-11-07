@@ -1,0 +1,1 @@
+User approved 2026-11-07: exactly one authenticated read-only GET /api/users/me; print only identity category. No publication or token change.
