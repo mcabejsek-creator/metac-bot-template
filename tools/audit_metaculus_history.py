@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +19,10 @@ BOT_ID = 307558
 PAGE_SIZE = 100
 MAX_PAGES = 200
 BATCH_SIZE = 40
+MIN_REQUEST_INTERVAL = 5.0  # Conservative spacing between GET requests
+MAX_GET_REQUESTS = 100        # Fail closed instead of hammering an API
+_LAST_REQUEST = None
+_REQUEST_COUNT = 0
 QUESTION_KINDS = {"binary", "multiple_choice", "numeric", "discrete", "date"}
 
 
@@ -27,6 +32,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def get_json(opener, token, path, params=()):
+    global _LAST_REQUEST, _REQUEST_COUNT
+    if _REQUEST_COUNT >= MAX_GET_REQUESTS:
+        raise RuntimeError("Conservative GET request budget reached; history not exported")
+    if _LAST_REQUEST is not None:
+        pause = MIN_REQUEST_INTERVAL - (time.monotonic() - _LAST_REQUEST)
+        if pause > 0:
+            time.sleep(pause)
+    _LAST_REQUEST = time.monotonic()
+    _REQUEST_COUNT += 1
     query = urllib.parse.urlencode(params)
     url = HOST + path + (("?" + query) if query else "")
     request = urllib.request.Request(
@@ -42,6 +56,9 @@ def get_json(opener, token, path, params=()):
                 raise RuntimeError("API response exceeds safe size limit")
             return json.loads(raw)
     except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            # Never automatically retry a throttled request.
+            raise RuntimeError("Metaculus rate limit HTTP 429; stop audit and honor server cooldown") from None
         raise RuntimeError(f"Metaculus API HTTP {exc.code}; no data exported") from None
     except urllib.error.URLError:
         raise RuntimeError("Metaculus API network/TLS failure; no data exported") from None
