@@ -1,0 +1,1 @@
+User explicitly approved 2026-11-07: create one encrypted GitHub journal, legacy-frozen-no-retries. NO Metaculus forecast/comment, no paid models, no external cron resume, no repeated initialization. Source e52? reviewed main f77f2329e9c09e787333416300ae35fa02f240a0.
