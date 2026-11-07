@@ -1,3 +1,0 @@
-One-time GitHub Actions trigger for at most two public, unauthenticated Metaculus GETs.
-No API tokens, models, forecasts, or publication state touched.
-Approved in conversation 2026-11-07.
