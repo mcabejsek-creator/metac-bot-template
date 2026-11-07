@@ -137,6 +137,35 @@ class ScanTests(unittest.TestCase):
                                  max_pages=100)
 
 
+class PinnedSDKCompatibilityTests(unittest.TestCase):
+    def test_installed_sdk_parses_synthetic_post_without_network(self):
+        # Deliberately exercise the REAL locked SDK 0.2.92, not only a fake.
+        from forecasting_tools import MetaculusClient
+        client = MetaculusClient(token="synthetic-offline-only")
+        self.assertTrue(callable(getattr(client, "_post_json_to_questions_while_handling_groups")))
+        raw = {
+            "id": 9991,
+            "question": {
+                "id": 9992, "title": "Synthetic offline test question",
+                "type": "binary", "status": "open",
+                "open_time": "2026-11-01T00:00:00Z",
+                "scheduled_close_time": "2026-11-10T00:00:00Z",
+                "my_forecasts": {"history": [], "latest": None},
+            },
+            "projects": {
+                "tournament": [{"slug": "fall-futureeval-2026"}],
+                "default_project": {"id": 33121, "visibility": "normal"},
+                "category": [],
+            },
+        }
+        result = scan_open_tournament(
+            client, 33121, read_page=lambda *_: ([raw], False), now=NOW,
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].id_of_question, 9992)
+        self.assertFalse(result[0].already_forecasted)
+
+
 class FakeResponse:
     status = 200
     def __init__(self, obj):
