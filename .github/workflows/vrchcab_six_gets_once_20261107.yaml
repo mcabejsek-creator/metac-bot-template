@@ -1,0 +1,49 @@
+# Explicit user approval, 2026-11-07: at most 6 credentialed Metaculus GETs,
+# three fixed pages for each of two tournaments. NO forecasting, LLMs or POST.
+# This workflow is branch-specific, push-only, one commit-message trigger,
+# GitHub first attempt ONLY. It has no write permissions and never schedules.
+name: Vrchcab six-GET one-shot metadata diagnostic (authorized)
+
+on:
+  push:
+    branches:
+      - "ops/authorized-six-get-metadata-20261107"
+    paths:
+      - ".github/workflows/vrchcab_six_gets_once_20261107.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vrchcab-authorized-one-shot-six-get-20261107
+  cancel-in-progress: false
+
+jobs:
+  one_shot_gets_only:
+    if: github.event.head_commit.message == 'AUTHORIZE_ONCE_METACULUS_SIX_GETS_20261107' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run six-request synthetic offline safety contract, no credentials
+        env:
+          METACULUS_TOKEN: ""
+          METACULUS_TOKEN_V2: ""
+          PERPLEXITY_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+        run: python -B tools/vrchcab_six_gets_once_20261107.py --self-check
+      - name: Exactly six maximum authenticated Metaculus GETs; no POST or models
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+          PERPLEXITY_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+          ASKNEWS_API_KEY: ""
+        run: python -B tools/vrchcab_six_gets_once_20261107.py --run-approved-once
