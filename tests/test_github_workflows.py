@@ -99,7 +99,9 @@ class ActionsConfigurationTests(OfflineTestCase):
         confirmation = workflow["on"]["workflow_dispatch"]["inputs"]["confirmation"]
         self.assertEqual(confirmation["default"], "not-confirmed")
         step = workflow["jobs"]["initialize"]["steps"][-1]
-        self.assertIn('--confirm-prior-runs-reconciled', step["run"])
+        self.assertIn('--confirm-legacy-frozen-no-retries', step["run"])
+        self.assertNotIn("--confirm-prior-runs-reconciled", step["run"])
+        self.assertEqual(confirmation["options"], ["not-confirmed", "legacy-frozen-no-retries"])
         self.assertIn('"$PRIOR_RUNS_ACK"', step["run"])
         self.assertNotIn('inputs.confirmation', step["run"])
         self.assertNotIn('main.py', step["run"])
