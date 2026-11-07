@@ -54,8 +54,8 @@ class InventoryTests(unittest.TestCase):
         self.assertFalse(report["publication_reconciled"])
         self.assertFalse(report["contains_question_ids_or_forecast_values"])
         serialized = json.dumps(report)
-        self.assertNotIn("201", serialized)
-        self.assertNotIn("202", serialized)
+        self.assertNotIn('"question_id":', serialized)
+        self.assertNotIn('"forecasts":', serialized)
 
     def test_empty_response_not_reconciled(self):
         report = audit.summarize_response({"results": []})
