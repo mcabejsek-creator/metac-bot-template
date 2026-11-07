@@ -1,0 +1,28 @@
+# Vrchcab — automatická čtecí kontrola otevřených otázek (návrh)
+
+Stav: 7. listopadu 2026. **Připraveno jen na samostatné vývojové větvi; bez merge do `main`, bez aktivního rozvrhu.**
+
+## Co přesně hlídač dělá
+
+- Pokud bude návrh schválen a sloučen do `main`, GitHub Actions může spouštět čtecí kontrolu každých cca **15 minut** (GitHub cron: `7,22,37,52 * * * *`, UTC). GitHub negarantuje přesné spuštění na minutu; může docházet ke zpožděním.
+- Každá kontrola má nejvýše dva veřejné GET požadavky `/api/posts/`, po jednom pro **Fall FutureEval (33121)** a **MiniBench (minibench)**, s filtrem `statuses=open` a prvním stránkovaným seznamem 100 příspěvků. Mezi dotazy je odstup minimálně 6 sekund; bez retry, bez přesměrování, bez dalších URL.
+- Nepoužívá `METACULUS_TOKEN`, `METACULUS_TOKEN_V2`, žádné jiné GitHub secrets ani placené modelové API. Nepublikuje forecasty nebo komentáře. Github workflow má **`permissions: contents: read`** a nepoužívá publikační žurnál.
+- V GitHub Actions se vypíše pouze počet veřejně otevřených příspěvků v každé soutěži. Pokud nějaké existují, vypíše se **varování** (workflow annotation) a zpráva do shrnutí běhu. Nepřenáší se ID, názvy nebo prognózy.
+- **Otevřená otázka není automaticky otázka, kterou bot ještě nepředpověděl.** Hlídač záměrně nepoužívá identitu bota pro kontrolu historie. Každý pozitivní nález vyžaduje následné bezpečné ověření a zvláštní schválení ostrého běhu.
+- Pokud API vrátí chybu, HTTP 429, změněné JSON schéma nebo možnou další stránku, kontrola skončí neúspěchem s **nejistým výsledkem**, nikoli tvrzením, že není co předpovídat.
+- Na pull requestech se spouští **pouze offline syntax/request-contract a syntetické testy**. GET na Metaculus proběhne teprve při ručním `workflow_dispatch` nebo rozvrhu na `main`.
+
+## Upozorňování a jeho hranice
+
+GitHub repo aktuálně vykazuje `has_issues=false`, takže nelze využít standardní upozornění prostřednictvím nového Issue. Tento read-only návrh proto **sám o sobě neslibuje doručení push/e-mail notifikace**. Pozitivní nález je viditelný v GitHub Actions (warning + job summary). Pokud má přijít oznámení přímo do ChatGPT, vhodný samostatný plán je přidat hodinovou podmíněnou automatizaci, která sleduje výsledky běhů a hlásí pouze novou změnu. ChatGPT task nepoběží častěji než jednou za hodinu.
+
+## Co zůstává nedotčeno
+
+- Starý GitHub workflow run `34463156990` je stále `queued` (vyřízení s GitHub Support #4966035 je samostatné).
+- Produkční opravy jsou v `main` SHA `3d54363f49768147606cde16698920ac514f29a6`; žurnál `metaculus-publication-state` je chráněný a další ostrý POST ještě nebyl odzkoušen.
+- Externí `cron-job.org` zůstává vypnutý. Tento návrh ho nezapíná ani nespouští `run_bot_on_tournament.yaml`, Cup či Test Bot.
+- Aktivace rozvrhu vyžaduje **samostatné schválení merge**; publikování bude mít další, oddělené schválení.
+
+## Jak ověřit
+
+Otevřít `Actions → Vrchcab public open-question watch (read only)`. Ručně spustit pouze tento čtecí workflow, nebo po merge sledovat rozvrh a souhrny. Nikdy nevyhodnocovat červený výsledek (HTTP chybu/paginaci) jako nulovou dostupnost.
