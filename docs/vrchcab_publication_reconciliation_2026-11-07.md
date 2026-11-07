@@ -102,3 +102,19 @@ Celkem **53 potvrzených událostí na 12 různých otázek**, z nichž **11 mě
 
 Výsledek je konzistentní s tím, že režim `test_questions` záměrně nastavuje `skip_previously_forecasted_questions=False` a publikuje. **Neprokazuje** nežádoucí duplicity v soutěžích FutureEval nebo MiniBench; u těch API vrátilo jednu historickou předpověď na každou z 171 otázek s historií. Je však nezbytné testovací režim zahrnout do návrhu izolace publikačních cest a rekonstrukce celkové historie.
 
+
+## Další autorizovaný projektový inventář: testovací oblast a podzimní Cup
+
+Na výslovné schválení uživatele byl 2026-11-07 12:58 UTC přes `METACULUS_TOKEN_V2` proveden nejvýše jeden GET `/api/questions/bulk-forecast-read/?project=...` pro každý z projektů `bot-testing-area` a podzimní Metaculus Cup (projekt `33108`). [Úspěšný běh 42374780896](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42374780896). U obou projektů byla odpověď HTTP 200 se souhrnem; dalších API požadavků ani publikování nebylo. Znovu prošlo všech 6 syntetických offline testů. Jednorázový spouštěč byl po provedení odstraněn.
+
+| Projekt | Otázky vrácené API | Otázky s historií bota | Počet záznamů | První předpověď UTC | Poslední předpověď UTC |
+|---|---:|---:|---:|---|---|
+| Bot testing area (`bot-testing-area`) | 14 | 12 | **780** | 2026-09-10 09:40:13 | 2026-11-06 15:49:33 |
+| Metaculus Cup Fall 2026 (`33108`) | 42 | 0 | **0** | – | – |
+
+Výsledek testovací oblasti ukazuje výrazně opakované publikování při režimu `test_questions`, který má záměrně `skip_previously_forecasted_questions=False`. V pěti vzorkovaných GitHub logách jsme dříve našli 53 potvrzených příspěvků na 12 různých otázek; souhrnná historie nyní vrací **780** záznamů a je úplnější než vzorek. Žádná ID otázek ani hodnoty prognóz se neukládají do zprávy.
+
+Z dosud provedených tří projektových kontrol platí: FutureEval **111** záznamů, MiniBench **60**, Bot testing area **780**, podzimní Metaculus Cup **0**. Jde tedy o **951 záznamů napříč těmito projekty**, ale *nikoliv nutně o 951 jedinečných globálních publikací* (projektová příslušnost může být překryvná, ani se netestovala). Absence Cup forecastů se týká **výhradně podzimního ročníku 2026**; starší ročníky nebyly dotazovány.
+
+**Není dokončena úplná rekonciliace.** Před spuštěním nebo inicializací publikace je třeba rozlišit staré nejasné pokusy, zkontrolovat případné další publikující cesty a bezpečně vyřešit starý běh 34463156990. Rotace tokenu je doložena předchozím ověřením (starý token vrací HTTP 403); nevytváří se automaticky tvrzení `all-prior-runs-reconciled`.
+
