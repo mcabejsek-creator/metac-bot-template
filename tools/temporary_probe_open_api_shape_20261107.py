@@ -62,6 +62,14 @@ def inspect():
         if i:
             time.sleep(6)
         req = make_request(project, token)
+        # Bounded one-off: explicitly request second page at offset 100,
+        # never follow server-provided URLs or redirect.
+        import urllib.parse
+        parsed_req = urllib.parse.urlsplit(req.full_url)
+        params = [(k, ("100" if k == "offset" else v)) for k, v in urllib.parse.parse_qsl(parsed_req.query)]
+        new_url = urllib.parse.urlunsplit((parsed_req.scheme, parsed_req.netloc, parsed_req.path,
+                                         urllib.parse.urlencode(params), ""))
+        req = urllib.request.Request(new_url, headers=dict(req.header_items()), method="GET")
         try:
             with opener.open(req, timeout=18) as resp:
                 if resp.status != 200:
@@ -91,7 +99,8 @@ def inspect():
                 visible_group += 1
         print(json.dumps({
             "project": label,
-            "first_page_rows": len(rows),
+            "page_offset": 100,
+            "page_rows": len(rows),
             "has_next": parsed.get("next") is not None,
             "next_type": type(parsed.get("next")).__name__,
             "next_truthy": bool(parsed.get("next")),
