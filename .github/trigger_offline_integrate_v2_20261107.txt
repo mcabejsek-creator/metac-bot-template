@@ -1,1 +1,0 @@
-Single offline test of exact main+PR3 commit combination. No secrets, no network API calls to Metaculus, no publishing, no merging into main.
