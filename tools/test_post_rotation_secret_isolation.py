@@ -53,8 +53,10 @@ class TokenIsolationRegression(unittest.TestCase):
 
     def test_no_auto_initialize(self):
         data = (EXPECTED_DIR / "initialize_publication_state.yaml").read_text(encoding="utf-8")
-        self.assertIn("all-prior-runs-reconciled", data)
-        self.assertIn("--confirm-prior-runs-reconciled", data)
+        self.assertIn("legacy-frozen-no-retries", data)
+        self.assertIn("--confirm-legacy-frozen-no-retries", data)
+        self.assertNotIn("all-prior-runs-reconciled", data)
+        self.assertNotIn("--confirm-prior-runs-reconciled", data)
 
 
 if __name__ == "__main__":

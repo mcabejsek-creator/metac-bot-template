@@ -358,15 +358,36 @@ def configured_store():
     return GitHubPublicationStore(contents, codec)
 
 
+# Explicitly preserve the distinction between abandoning legacy attempts and
+# proving the outcome of every old Metaculus POST. This authenticated metadata
+# remains encrypted with the rest of the journal, and registry updates preserve it.
+LEGACY_FREEZE_POLICY = {
+    "mode": "legacy-frozen-no-retries",
+    "historic_outcomes": "not-fully-reconciled",
+    "disposition": "abandoned-without-replay",
+}
+
+
+def initial_legacy_frozen_manifest():
+    """New journal starts a NEW publication epoch, never imports old intents."""
+    return canonical({
+        "version": 1,
+        "resources": [],
+        "legacy_cutover": LEGACY_FREEZE_POLICY,
+    }).encode()
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Initialize a new GitHub publication journal; never reset an existing one")
+    parser = argparse.ArgumentParser(
+        description="Initialize once, after explicit permanent freeze of historical runs; never reset an existing journal"
+    )
     parser.add_argument("--initialize", action="store_true", required=True)
-    parser.add_argument("--confirm-prior-runs-reconciled", action="store_true", required=True)
+    parser.add_argument("--confirm-legacy-frozen-no-retries", action="store_true", required=True)
     parser.parse_args()
     store = configured_store()
-    manifest = canonical({"version": 1, "resources": []}).encode()
+    manifest = initial_legacy_frozen_manifest()
     store.contents.initialize(store.codec.encode(manifest), os.getenv("GITHUB_SHA", ""))
-    print("New encrypted journal initialized; no Metaculus request was made.")
+    print("New legacy-frozen encrypted journal initialized; no Metaculus request was made.")
 
 
 if __name__ == "__main__":

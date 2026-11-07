@@ -9,7 +9,8 @@ import requests
 from .support import LocalMetaculus, OfflineTestCase, question
 from github_publication import (
     GitHubContents, GitHubPublicationStore, GitHubStateError, JournalCodec,
-    StateConflict, configured_store, git_blob_sha,
+    StateConflict, configured_store, git_blob_sha, initial_legacy_frozen_manifest,
+    main as journal_initialization_main,
 )
 from publication_journal import PublicationRejected, PublicationUncertain, Publisher
 
@@ -561,3 +562,54 @@ class GitHubProtocolTests(OfflineTestCase):
     def test_codec_rejects_short_placeholder_keys(self):
         with self.assertRaises(GitHubStateError):
             JournalCodec("REPLACE_ME", CONTEXT)
+    def test_legacy_frozen_initial_manifest_is_truthful(self):
+        manifest = json.loads(initial_legacy_frozen_manifest())
+        self.assertEqual(manifest["version"], 1)
+        self.assertEqual(manifest["resources"], [])
+        self.assertEqual(manifest["legacy_cutover"]["mode"], "legacy-frozen-no-retries")
+        self.assertEqual(manifest["legacy_cutover"]["historic_outcomes"], "not-fully-reconciled")
+        self.assertEqual(manifest["legacy_cutover"]["disposition"], "abandoned-without-replay")
+        self.assertNotIn("reconciled", str(manifest).replace("not-fully-reconciled", ""))
+
+    def test_legacy_frozen_manifest_is_encrypted_before_git_ref_creation(self):
+        codec = JournalCodec(METACULUS_KEY, CONTEXT)
+        plaintext = initial_legacy_frozen_manifest()
+        sealed = codec.encode(plaintext)
+        self.assertNotIn(b"legacy-frozen-no-retries", sealed)
+        self.assertEqual(json.loads(codec.decode(sealed)), json.loads(plaintext))
+
+    def test_legacy_freeze_initializer_rejects_missing_ack_without_store(self):
+        with patch("sys.argv", ["github_publication", "--initialize"]):
+            with patch("github_publication.configured_store", side_effect=AssertionError("No store permitted")):
+                with self.assertRaises(SystemExit) as caught:
+                    journal_initialization_main()
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_legacy_freeze_initializer_rejects_obsolete_reconciled_flag_without_store(self):
+        with patch("sys.argv", ["github_publication", "--initialize",
+                                "--confirm-prior-runs-reconciled"]):
+            with patch("github_publication.configured_store", side_effect=AssertionError("No store permitted")):
+                with self.assertRaises(SystemExit) as caught:
+                    journal_initialization_main()
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_legacy_freeze_initializer_creates_only_new_encrypted_manifest(self):
+        from unittest.mock import Mock
+        codec = JournalCodec(METACULUS_KEY, CONTEXT)
+        contents = Mock()
+        test_store = Mock(contents=contents, codec=codec)
+        source_sha = "a" * 40
+        with patch("sys.argv", ["github_publication", "--initialize",
+                                "--confirm-legacy-frozen-no-retries"]):
+            with patch("github_publication.configured_store", return_value=test_store):
+                with patch.dict(os.environ, {"GITHUB_SHA": source_sha}):
+                    journal_initialization_main()
+        contents.initialize.assert_called_once()
+        sealed, used_sha = contents.initialize.call_args.args
+        self.assertEqual(used_sha, source_sha)
+        manifest = json.loads(codec.decode(sealed))
+        self.assertEqual(manifest, json.loads(initial_legacy_frozen_manifest()))
+        contents.read.assert_not_called()
+        contents.create.assert_not_called()
+        contents.compare_and_swap.assert_not_called()
+
