@@ -8,6 +8,8 @@ on:
       - "tools/probe_open_questions_readonly.py"
       - "tools/probe_open_questions_authenticated.py"
       - "tools/check_bulk_read_method_offline.py"
+      - "tools/project_history_inventory_readonly.py"
+      - "tools/test_project_history_inventory_offline.py"
       - ".github/workflows/offline_question_selection_diagnostics.yaml"
 
 permissions:
@@ -48,3 +50,7 @@ jobs:
         run: poetry run python -B tools/probe_open_questions_authenticated.py --self-check
       - name: Compare historical audit method to installed SDK offline
         run: poetry run python -B tools/check_bulk_read_method_offline.py
+      - name: Verify project-scoped audit uses strict query contract (offline)
+        run: poetry run python -B tools/project_history_inventory_readonly.py --self-check
+      - name: Test inventory response validation and fail-closed HTTP 429 (offline)
+        run: poetry run python -B tools/test_project_history_inventory_offline.py
