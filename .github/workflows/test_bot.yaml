@@ -51,7 +51,7 @@ jobs:
         run: poetry run python -B -m tests.run
       - name: Run bot
         run: |
-          poetry run python -B -m bounded_run -- python main.py --mode test_questions
+          .venv/bin/python -B -m bounded_run -- .venv/bin/python -B main.py --mode test_questions
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:

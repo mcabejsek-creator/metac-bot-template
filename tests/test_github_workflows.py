@@ -29,21 +29,33 @@ class ActionsConfigurationTests(OfflineTestCase):
 
     def test_original_forecast_triggers_and_commands_are_preserved(self):
         expected = {
-            "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, "poetry run python main.py"),
-            "test_bot.yaml": ({"workflow_dispatch"}, "poetry run python main.py --mode test_questions"),
-            "run_bot_on_metaculus_cup.yaml": ({"workflow_dispatch"}, "poetry run python main.py --mode metaculus_cup"),
+            "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py"),
+            "test_bot.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py --mode test_questions"),
+            "run_bot_on_metaculus_cup.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py --mode metaculus_cup"),
         }
         for name, (triggers, command) in expected.items():
             workflow = self.workflows[name]
             self.assertEqual(set(workflow["on"]), triggers)
             step = next(s for s in workflow["jobs"]["forecast_job"]["steps"] if s.get("name") == "Run bot")
             supervised = step["run"].strip()
-            self.assertTrue(supervised.startswith("poetry run python -B -m bounded_run -- "))
-            self.assertEqual("poetry run " + supervised.split(" -- ", 1)[1], command)
+            self.assertTrue(supervised.startswith(".venv/bin/python -B -m bounded_run -- "))
+            self.assertEqual(supervised.split(" -- ", 1)[1], command)
             self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
             self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
             self.assertNotIn("${{ secrets.METACULUS_TOKEN }}", step["env"].values())
         self.assertNotIn("schedule", self.workflows["run_bot_on_metaculus_cup.yaml"]["on"])
+
+    def test_real_supervisor_cli_accepts_python_flags_without_poetry_parser(self):
+        # Uses only the local interpreter, a synthetic child and no API imports.
+        # Regression for the 2026-11-07 failed live launch before the bot started.
+        import sys
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "-B", "-m", "bounded_run", "--",
+             sys.executable, "-B", "-c", "print('OFFLINE_SUPERVISOR_EXECUTED')"],
+            cwd=root, capture_output=True, text=True, timeout=12)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OFFLINE_SUPERVISOR_EXECUTED", result.stdout)
 
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
