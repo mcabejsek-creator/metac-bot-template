@@ -1,0 +1,70 @@
+# User-authorized, once-only GitHub journal bootstrap. NO Metaculus requests.
+# This isolated workflow is triggered only by the exact marker commit, then deleted.
+name: One-time legacy-frozen Vrchcab journal initialization
+
+on:
+  push:
+    branches:
+      - ops/one-time-legacy-frozen-journal-init-20261107
+    paths:
+      - ".github/trigger_legacy_frozen_init_20261107.txt"
+
+permissions:
+  contents: write
+
+# Same lock as every publisher and manual journal initialization.
+concurrency:
+  group: metaculus-publication-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap_only:
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run approved one-time Vrchcab encrypted journal initialization'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_SOURCE_SHA: f77f2329e9c09e787333416300ae35fa02f240a0
+      METACULUS_PUBLICATION_BACKEND: github
+      METACULUS_PUBLICATION_STATE_BRANCH: metaculus-publication-state
+      METACULUS_PUBLICATION_STATE_PATH: publication.enc
+      METACULUS_PUBLICATION_SCOPE: default-bot
+    steps:
+      - name: Checkout immutable audited production commit
+        uses: actions/checkout@v4
+        with:
+          ref: f77f2329e9c09e787333416300ae35fa02f240a0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install locked dependencies, no secrets
+        run: poetry install --no-interaction --no-root
+      - name: Verify exact approved source and security tests, no secrets
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          python -B tools/test_post_rotation_secret_isolation.py
+          poetry run python -B -m tests.run --strict-known-bugs
+      - name: Create exactly one new encrypted orphan journal; no Metaculus calls
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          env GITHUB_SHA="$EXPECTED_SOURCE_SHA" poetry run python -B -m github_publication \
+            --initialize --confirm-legacy-frozen-no-retries
+      - name: Verify encrypted journal can be decrypted and read back (GET only)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+        run: |
+          poetry run python -B - <<'PY'
+          from github_publication import configured_store
+          configured_store().preflight()
+          print("SEALED_JOURNAL_PREFLIGHT_OK: manifest authenticated and readable")
+          PY
