@@ -46,7 +46,7 @@ jobs:
       - name: Initialize once; never overwrite an existing state ref
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
           PRIOR_RUNS_ACK: ${{ inputs.confirmation }}
         run: |
           if [ "$PRIOR_RUNS_ACK" != "all-prior-runs-reconciled" ]; then
