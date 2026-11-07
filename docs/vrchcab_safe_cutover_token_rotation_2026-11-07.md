@@ -33,3 +33,14 @@ V opravách PR #1 soubor `github_publication.py` odvozuje šifrovací klíč pub
 - **Nevíme**, zda změna tokenu v aktuálním Metaculus účtu skutečně zruší předchozí credential, ani zda bude přes dotaz `project` dostupná celá historie. Bez ověření nelze tyto body deklarovat jako splněné.
 
 **Žádný krok v tomto dokumentu se automaticky nespouští.**
+
+## Ověření po rotaci (provedeno 2026-11-07)
+
+Uživatel potvrdil, že přes rozhraní Vrchcab provedl rotaci původního API klíče a do GitHub Actions uložil nový pod jménem `METACULUS_TOKEN_V2`. **Hodnoty tokenů nejsou nikde v tomto dokumentu.**
+
+- [Před rotací: identita původního GitHub tokenu](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42371618440): 2026-11-07 12:14 UTC, HTTP 200 na `GET /api/users/me/`, identita `BOT_VRCHCAB`.
+- [Po rotaci: jednorázový test obou GitHub secrets](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42372668966): 2026-11-07 12:29 UTC, nový secret `METACULUS_TOKEN_V2` vrací HTTP 200 se správnou identitou `BOT_VRCHCAB`; starý `METACULUS_TOKEN` vrací HTTP 403 na **stejné** identitní adrese.
+- Kód sám klasifikoval starý HTTP 403 konzervativně jako **neprůkazný pro všechny ostatní API operace**, nikoli jako úspěšnou bezvýhradnou revokaci. V kontextu potvrzovacího dialogu Metaculus („zneplatní aktuální API klíč“) a předchozího 200 pro původní token jde o silný důkaz změny autentizace; nikoli o povolení k ostrému publikování.
+- Jednorázový workflow i spouštěcí marker byly z testovací větve odstraněny. Produkční `main` a PR #1 zůstávají bez merge, žurnál nebyl inicializován, starý GitHub běh z 10. 9. je nadále ve frontě.
+- Dále zbývá provést omezený čtecí audit historických předpovědí s novým tokenem (vyžaduje samostatné schválení), vyhodnotit nejasné historické pokusy, připravit integraci PR #3 do PR #1, offline ověřit všechny vstupy a teprve poté výslovně povolit inicializaci žurnálu.
+
