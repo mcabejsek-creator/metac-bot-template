@@ -1,0 +1,1 @@
+One second page offset100 per FutureEval and MiniBench with read-only GET, no publish, no model.
