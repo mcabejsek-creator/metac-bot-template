@@ -1,1 +1,0 @@
-Approved in chat on 2026-11-07. One-time only: 2 maximum authenticated, read-only HTTPS GET requests; no POSTs, no retry on errors; only aggregate counts; secret scoped to runner.
