@@ -103,11 +103,31 @@ class ScanTests(unittest.TestCase):
             scan_open_tournament(FakeClient(), 33121,
                                  read_page=lambda *_: ([p], False), now=NOW)
 
-    def test_next_marker_after_empty_pages_does_not_loop_forever(self):
+    def test_phantom_next_terminates_after_two_empty_pages(self):
+        # Django CountlessLimitOffsetPagination uses infinite 'count', so
+        # 'next' stays populated after the last available post.
         calls = []
         def endless(_, offset):
             calls.append(offset)
             return [], True
+        result = scan_open_tournament(FakeClient(), "minibench",
+                                      read_page=endless, now=NOW)
+        self.assertEqual(result, [])
+        self.assertEqual(calls, [0, PAGE_SIZE])
+
+    def test_single_empty_page_is_not_terminal(self):
+        pages = iter([([], True), ([post(11)], True),
+                      ([], True), ([], True)])
+        result = scan_open_tournament(
+            FakeClient(), 33121, read_page=lambda *_: next(pages), now=NOW
+        )
+        self.assertEqual([q.id_of_question for q in result], [11])
+
+    def test_all_pages_nonempty_aborts_at_fixed_cap(self):
+        calls = []
+        def endless(_, offset):
+            calls.append(offset)
+            return [post(offset + 1)], True
         with self.assertRaisesRegex(IncompleteQuestionScan, "fixed GET cap"):
             scan_open_tournament(FakeClient(), "minibench",
                                  read_page=endless, now=NOW)
