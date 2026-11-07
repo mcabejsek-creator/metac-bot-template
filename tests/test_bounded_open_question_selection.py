@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 import urllib.error
 import urllib.parse
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from bounded_open_question_selection import (
     API_BASE, BoundedPostReader, IncompleteQuestionScan, PAGE_SIZE,
@@ -226,6 +226,32 @@ class ScanTests(unittest.TestCase):
 
 
 class PinnedSDKCompatibilityTests(unittest.TestCase):
+    def test_locked_sdk_forecast_questions_skips_existing_before_work(self):
+        # Directly exercise the installed SDK method with an inert host object.
+        # No forecast implementation, network, model, API key or publication.
+        import asyncio
+        from forecasting_tools.forecast_bots.forecast_bot import ForecastBot
+        worker = AsyncMock(return_value="synthetic-report")
+        inert = SimpleNamespace(
+            skip_previously_forecasted_questions=True,
+            folder_to_save_reports_to=None,
+            _run_individual_question_with_error_propagation=worker,
+        )
+        previous = question(7801, old=True)
+        fresh = question(7802, old=False)
+        reports = asyncio.run(ForecastBot.forecast_questions(
+            inert, [previous, fresh], return_exceptions=True,
+        ))
+        self.assertEqual(reports, ["synthetic-report"])
+        worker.assert_awaited_once_with(fresh)
+
+        worker.reset_mock()
+        none = asyncio.run(ForecastBot.forecast_questions(
+            inert, [previous], return_exceptions=True,
+        ))
+        self.assertEqual(none, [])
+        worker.assert_not_awaited()
+
     def test_installed_sdk_parses_synthetic_post_without_network(self):
         # Deliberately exercise the REAL locked SDK 0.2.92, not only a fake.
         from forecasting_tools import MetaculusClient
