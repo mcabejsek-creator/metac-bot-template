@@ -1,0 +1,65 @@
+# Final one-shot offline candidate verification; no production branch changes.
+name: Final offline combined Vrchcab release regression (no publishing)
+
+on:
+  push:
+    branches:
+      - diagnostics/final-v2-offline-release-check-20261107
+    paths:
+      - ".github/trigger_final_v2_offline_20261107.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  final_verify:
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one final offline Vrchcab candidate regression'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PINNED_MAIN: f0da8ce7b3351f48115fdeb8394fcfb2e88c1341
+      PINNED_CANDIDATE: 16d0331545273d5c105357d70f008802b3ace8f7
+      METACULUS_PUBLICATION_BACKEND: github
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      PERPLEXITY_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+    steps:
+      - name: Check out exact production main without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: f0da8ce7b3351f48115fdeb8394fcfb2e88c1341
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce final PR3 merge locally only (no push)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_MAIN"
+          git fetch --no-tags origin "$PINNED_CANDIDATE"
+          test "$(git rev-parse FETCH_HEAD)" = "$PINNED_CANDIDATE"
+          git -c user.name="Offline Release Check" -c user.email="offline-check@users.noreply.github.com" merge --no-ff --no-edit "$PINNED_CANDIDATE"
+          test "$(git rev-parse HEAD^1)" = "$PINNED_MAIN"
+          test "$(git rev-parse HEAD^2)" = "$PINNED_CANDIDATE"
+          echo "Merged candidate solely in temporary runner; main untouched."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install exact pinned project dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Verify every workflow refuses the revoked token
+        run: poetry run python -B tools/test_post_rotation_secret_isolation.py
+      - name: Run full offline tests with zero model or Metaculus secrets
+        run: poetry run python -B -m tests.run --strict-known-bugs --report final-offline-v2-results.json
+      - name: Print pure-source safety summary
+        run: |
+          grep -F 'secrets.METACULUS_TOKEN_V2' .github/workflows/metaculus_history_audit.yaml >/dev/null
+          grep -F 'secrets.METACULUS_TOKEN_V2' .github/workflows/run_bot_on_tournament.yaml >/dev/null
+          grep -F 'secrets.METACULUS_TOKEN_V2' .github/workflows/initialize_publication_state.yaml >/dev/null
+          echo "OFFLINE_FINAL_RELEASE_TEST_PASSED; no credentials, forecasts, journal writes, or deployment"
