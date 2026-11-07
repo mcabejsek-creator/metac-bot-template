@@ -31,7 +31,7 @@ class ActionsConfigurationTests(OfflineTestCase):
         expected = {
             "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, "poetry run python main.py"),
             "test_bot.yaml": ({"workflow_dispatch"}, "poetry run python main.py --mode test_questions"),
-            "run_bot_on_metaculus_cup.yaml": ({"workflow_dispatch", "schedule"}, "poetry run python main.py --mode metaculus_cup"),
+            "run_bot_on_metaculus_cup.yaml": ({"workflow_dispatch"}, "poetry run python main.py --mode metaculus_cup"),
         }
         for name, (triggers, command) in expected.items():
             workflow = self.workflows[name]
@@ -42,7 +42,7 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertEqual("poetry run " + supervised.split(" -- ", 1)[1], command)
             self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
             self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN }}")
-        self.assertEqual(self.workflows["run_bot_on_metaculus_cup.yaml"]["on"]["schedule"], [{"cron": "0 0 */2 * *"}])
+        self.assertNotIn("schedule", self.workflows["run_bot_on_metaculus_cup.yaml"]["on"])
 
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
