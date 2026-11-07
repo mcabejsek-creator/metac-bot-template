@@ -1,1 +1,0 @@
-Exactly two V2 authenticated GET checks; emit aggregate response status counts and schema keys only, never IDs or forecast details. No forecasting or model calls.
