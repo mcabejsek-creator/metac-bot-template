@@ -1,7 +1,8 @@
-# A public Metaculus read-only watch. It NEVER publishes, calls LLMs, or reads bot secrets.
+# Authenticated GET-only Metaculus watch. It NEVER publishes or calls LLMs.
+# Uses only the rotated Vrchcab secret V2 during the monitor step; NO secrets in PR CI.
 # Schedule only operates on default branch after separate merge approval.
 # Results appear in Actions step summary; GitHub notifications are not guaranteed.
-name: Vrchcab public open-question watch (read only)
+name: Vrchcab authenticated open-question watch (read only)
 
 on:
   pull_request:
@@ -32,7 +33,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Validate exactly two public GET request shapes (NO NETWORK)
+      - name: Validate exactly two authenticated GET request shapes (NO NETWORK)
         run: python -B tools/watch_open_metaculus_questions_readonly.py --self-check
       - name: Run all fail-closed synthetic tests (NO NETWORK)
         run: python -B tools/test_watch_open_metaculus_questions_readonly.py
@@ -49,10 +50,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Exactly two public Metaculus GET checks; candidate counts only
+      - name: Exactly two authenticated Metaculus GET checks; candidate counts only
         env:
-          METACULUS_TOKEN: ""
-          METACULUS_TOKEN_V2: ""
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
           PERPLEXITY_API_KEY: ""
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
