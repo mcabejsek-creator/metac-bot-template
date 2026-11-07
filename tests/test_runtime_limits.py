@@ -228,6 +228,28 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
         self.assertEqual(reports, identifiers)
         self.assertEqual(sum(budget == 10800 for budget, _ in observed), 1)
 
+    async def test_failed_second_scan_never_starts_forecasting(self):
+        bot = self.bot()
+        scanned, forecasts_started = [], []
+
+        def scan(client, tournament, *, read_page):
+            scanned.append(tournament)
+            if len(scanned) == 2:
+                raise RuntimeError("Synthetic incomplete second tournament")
+            return [1]
+
+        async def forecast(*args, **kwargs):
+            forecasts_started.append(True)
+            raise AssertionError("No forecast is allowed after incomplete inventory")
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        with self.assertRaisesRegex(RuntimeError, "incomplete second tournament"):
+            await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+        self.assertEqual(forecasts_started, [])
+
     async def test_run_deadline_also_covers_tournament_retrieval(self):
         bot = self.bot()
         observed = self.timeout_probe()
