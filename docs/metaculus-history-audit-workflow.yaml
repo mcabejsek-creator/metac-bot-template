@@ -1,0 +1,36 @@
+# INACTIVE DRAFT: this file lives under docs/, NOT .github/workflows/.
+# Activation requires separate review and approval; never auto-run.
+name: Metaculus history audit (read-only, aggregate-only)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout audited code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Read only own forecast inventory
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN }}
+        run: |
+          python -B tools/audit_metaculus_history.py \
+            --user-id 307558 \
+            --output metaculus-audit-summary.json
+      - name: Upload aggregate summary only
+        uses: actions/upload-artifact@v4
+        with:
+          name: metaculus-history-aggregate
+          path: metaculus-audit-summary.json
+          if-no-files-found: error
+          retention-days: 7
