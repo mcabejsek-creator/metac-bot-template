@@ -69,6 +69,28 @@ class ScanTests(unittest.TestCase):
                                      read_page=lambda *_: next(pages), now=NOW)
         self.assertEqual([q.id_of_question for q in result], [31, 32])
 
+    def test_conditional_validates_nested_history(self):
+        leaf = lambda ident: {
+            "id": ident, "status": "open", "my_forecasts": {"history": []}
+        }
+        conditional = {
+            "id": 700,
+            "conditional": {
+                "condition": leaf(701), "condition_child": leaf(702),
+                "question_yes": leaf(703), "question_no": leaf(704),
+            },
+            "_synthetic_questions": [question(703), question(704)],
+        }
+        result = scan_open_tournament(
+            FakeClient(), 33121, read_page=lambda *_: ([conditional], False), now=NOW,
+        )
+        self.assertEqual([q.id_of_question for q in result], [703, 704])
+        conditional["conditional"]["question_yes"]["my_forecasts"] = None
+        with self.assertRaisesRegex(IncompleteQuestionScan, "history"):
+            scan_open_tournament(
+                FakeClient(), 33121, read_page=lambda *_: ([conditional], False), now=NOW,
+            )
+
     def test_deduplicate_question_ids_and_preserve_forecast_status(self):
         p = post(4, old=True)
         pages = iter([([p], True), ([p, post(5)], False)])
