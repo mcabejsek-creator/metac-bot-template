@@ -35,7 +35,7 @@ class TokenIsolationRegression(unittest.TestCase):
             with self.subTest(workflow=path.name):
                 data = path.read_text(encoding="utf-8")
                 self.assertNotIn(OLD_BINDING, data)
-                if 'METACULUS_TOKEN:' in data:
+                if 'secrets.METACULUS_TOKEN' in data:
                     self.assertIn(NEW_BINDING, data)
 
     def test_publication_flows_stay_manual(self):
