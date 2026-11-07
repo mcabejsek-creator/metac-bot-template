@@ -1,1 +1,0 @@
-One-time approved request: authenticated GET /api/users/me/; only output identity class. Do not publish, change or reveal token.
