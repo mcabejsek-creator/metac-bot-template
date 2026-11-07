@@ -1,1 +1,0 @@
-Final one-only authenticated 2 GET read-only watch test, first page candidate count, no ids or models or publication.
