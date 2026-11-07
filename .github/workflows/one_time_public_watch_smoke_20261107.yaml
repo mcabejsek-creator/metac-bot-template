@@ -6,14 +6,14 @@ on:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_second_page_metadata_20261107.txt"
+      - ".github/trigger_second_page_retry_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one V2 GET second-page-only scan'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run verified V2 GET second-page-only scan'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 8687a5ab34e491b85623d535f63669705049eea8
+          ref: 3db2a483c7a3c4a1e48bad8ecb498c4e5de398f8
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
