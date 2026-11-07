@@ -8,6 +8,8 @@ on:
       - "main.py"
       - "bounded_open_question_selection.py"
       - "tests/test_bounded_open_question_selection.py"
+      - "tests/test_runtime_limits.py"
+      - "docs/vrchcab_bounded_pagination_review_20261107.md"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
