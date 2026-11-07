@@ -6,6 +6,7 @@ on:
     paths:
       - "tools/diagnose_question_selection_offline.py"
       - "tools/probe_open_questions_readonly.py"
+      - "tools/probe_open_questions_authenticated.py"
       - ".github/workflows/offline_question_selection_diagnostics.yaml"
 
 permissions:
@@ -42,3 +43,5 @@ jobs:
         run: poetry run python -B tools/diagnose_question_selection_offline.py
       - name: Verify public GET probe safety (no network calls)
         run: poetry run python -B tools/probe_open_questions_readonly.py --self-check
+      - name: Verify authorized GET probe shape (no network)
+        run: poetry run python -B tools/probe_open_questions_authenticated.py --self-check
