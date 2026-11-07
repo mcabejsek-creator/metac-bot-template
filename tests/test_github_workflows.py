@@ -41,7 +41,8 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertTrue(supervised.startswith("poetry run python -B -m bounded_run -- "))
             self.assertEqual("poetry run " + supervised.split(" -- ", 1)[1], command)
             self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
-            self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN }}")
+            self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
+            self.assertNotIn("${{ secrets.METACULUS_TOKEN }}", step["env"].values())
         self.assertNotIn("schedule", self.workflows["run_bot_on_metaculus_cup.yaml"]["on"])
 
     def test_source_checkout_does_not_persist_state_write_credentials(self):
