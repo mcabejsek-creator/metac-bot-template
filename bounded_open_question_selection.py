@@ -100,7 +100,14 @@ def _validate_history(post):
         group = post["group_of_questions"]
         leaves = group.get("questions") if isinstance(group, dict) else None
     elif "conditional" in post:
-        leaves = [post["conditional"]]
+        conditional = post["conditional"]
+        if not isinstance(conditional, dict):
+            raise IncompleteQuestionScan("Malformed conditional post")
+        leaves = [
+            conditional.get(key)
+            for key in ("condition", "condition_child", "question_yes", "question_no")
+            if conditional.get(key) is not None
+        ]
     else:
         leaves = [post.get("question")]
     if not isinstance(leaves, list) or not leaves:
