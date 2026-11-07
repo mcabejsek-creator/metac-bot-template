@@ -2,7 +2,9 @@
 
 A candidate means an open post returned by Metaculus, NOT proof that the bot
 has never forecast it or that an eligible question is currently available.
-Exactly 0-2 PUBLIC HTTPS GETs. No tokens, POSTs, models, or publication.
+Exactly 0-2 authenticated READ-ONLY HTTPS GETs. No POSTs, models, or publication.
+The Vrchcab token is read only from the GitHub secret environment, never logged.
+Unauthenticated GET returned HTTP 403 from GitHub Actions on 2026-11-07.
 On pagination ambiguity, HTTP 429, unexpected data or network errors: fail
 closed and do not report "zero questions".
 """
@@ -30,7 +32,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise RuntimeError("Redirect refused; no second host contacted")
 
 
-def make_request(project):
+def normalized_token(value):
+    token = value.strip()
+    if token.startswith("Token "):
+        token = token[6:].strip()
+    if len(token) < 32 or any(c.isspace() for c in token):
+        raise RuntimeError("Missing/malformed read-only Metaculus credential; zero requests")
+    return token
+
+
+def make_request(project, token):
     if project not in {project_id for _, project_id in TARGETS}:
         raise RuntimeError("Unexpected project; refusing request")
     params = [
@@ -46,11 +57,12 @@ def make_request(project):
     req = urllib.request.Request(
         "https://" + HOST + API_PATH + "?" + query,
         headers={"Accept": "application/json",
-                 "User-Agent": "Vrchcab-public-readonly-open-post-watch/1"},
+                 "Authorization": "Token " + normalized_token(token),
+                 "User-Agent": "Vrchcab-authenticated-readonly-open-post-watch/1"},
         method="GET",
     )
-    if req.get_method() != "GET" or req.has_header("Authorization"):
-        raise RuntimeError("Non-public or non-GET request rejected")
+    if req.get_method() != "GET" or not req.has_header("Authorization"):
+        raise RuntimeError("Unauthenticated or non-GET request rejected")
     return req
 
 
@@ -67,8 +79,8 @@ def summarize(data):
     return len(rows)
 
 
-def fetch_one(opener, project):
-    request = make_request(project)
+def fetch_one(opener, project, token):
+    request = make_request(project, token)
     try:
         with opener.open(request, timeout=18) as response:
             if response.status != 200:
@@ -88,6 +100,7 @@ def fetch_one(opener, project):
 
 
 def check():
+    token = normalized_token(os.environ.get("METACULUS_TOKEN", ""))
     opener = urllib.request.build_opener(NoRedirect())
     rows = []
     before = None
@@ -97,7 +110,7 @@ def check():
             if delay > 0:
                 time.sleep(delay)
         before = time.monotonic()
-        rows.append((label, fetch_one(opener, project)))
+        rows.append((label, fetch_one(opener, project, token)))
     total = sum(n for _, n in rows)
     report = {
         "watch": "public_read_only_first_page",
@@ -106,6 +119,7 @@ def check():
         "requests": len(TARGETS),
         "bot_forecast_status_verified": False,
         "publishes_forecasts": False,
+        "authenticated_read_only": True,
         "note": "Open public posts are candidates only; verify prior Vrchcab forecasts and eligibility before any live run.",
     }
     print(json.dumps(report, ensure_ascii=False), flush=True)
@@ -115,7 +129,7 @@ def check():
             out.write("### Vrchcab read-only Metaculus monitor\n\n")
             for name, count in rows:
                 out.write("- " + name + ": **" + str(count) + "** public open posts\n")
-            out.write("\nOpen posts are **not** proof of new, unforecasted questions. No token, forecast or paid models used.\n")
+            out.write("\nOpen posts are **not** proof of new, unforecasted questions. Authenticated GET only; no forecast, token value disclosure or paid models.\n")
     if total:
         print("::warning::Publicly open Metaculus posts detected; manually check Vrchcab history before forecasting.", flush=True)
     else:
@@ -124,7 +138,7 @@ def check():
 
 def self_check():
     for _, project in TARGETS:
-        r = make_request(project)
+        r = make_request(project, "a" * 48)
         u = urllib.parse.urlsplit(r.full_url)
         q = urllib.parse.parse_qs(u.query)
         assert (u.scheme, u.netloc, u.path) == ("https", HOST, API_PATH)
@@ -133,7 +147,7 @@ def self_check():
         assert q["offset"] == ["0"] and q["limit"] == [str(FIRST_PAGE_LIMIT)]
         assert q["forecast_type"] == list(FORECAST_TYPES)
         assert r.get_method() == "GET"
-        assert not r.has_header("Authorization")
+        assert r.get_header("Authorization") == "Token " + "a" * 48
     assert summarize({"results": []}) == 0
     assert summarize({"results": [{}]}) == 1
     print("Offline request contract OK; no network used.")
