@@ -1,1 +1,0 @@
-Explicit user consent: no more than one token-authenticated GET for Fall FutureEval 33121 and one for MiniBench, using Vrchcab's METACULUS_TOKEN_V2. No forecast publishing, no paid models, no retries. 2026-11-07.
