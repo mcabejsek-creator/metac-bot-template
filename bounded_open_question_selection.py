@@ -96,6 +96,7 @@ class BoundedPostReader:
 def _validate_history(post):
     if "notebook" in post:
         return False
+    conditional_branches = None
     if "group_of_questions" in post:
         group = post["group_of_questions"]
         leaves = group.get("questions") if isinstance(group, dict) else None
@@ -103,6 +104,9 @@ def _validate_history(post):
         conditional = post["conditional"]
         if not isinstance(conditional, dict):
             raise IncompleteQuestionScan("Malformed conditional post")
+        conditional_branches = (
+            conditional.get("question_yes"), conditional.get("question_no"),
+        )
         leaves = [
             conditional.get(key)
             for key in ("condition", "condition_child", "question_yes", "question_no")
@@ -120,6 +124,22 @@ def _validate_history(post):
         info = leaf.get("my_forecasts")
         if not isinstance(info, dict) or not isinstance(info.get("history"), list):
             raise IncompleteQuestionScan("Missing authoritative own-forecast history")
+    if conditional_branches is not None:
+        # The pinned SDK takes (yes.my_forecasts or no.my_forecasts).
+        # A dict with an EMPTY history is truthy. A forecast only on the
+        # "no" branch would therefore be misread as "never forecasted"
+        # whenever the "yes" branch has an empty dict. Fail closed rather
+        # than potentially publish a duplicate conditional forecast.
+        states = []
+        for branch in conditional_branches:
+            if not isinstance(branch, dict):
+                raise IncompleteQuestionScan("Malformed conditional branch")
+            my = branch.get("my_forecasts")
+            if not isinstance(my, dict) or not isinstance(my.get("history"), list):
+                raise IncompleteQuestionScan("Missing authoritative conditional branch history")
+            states.append(bool(my["history"]))
+        if states[0] != states[1]:
+            raise IncompleteQuestionScan("Conflicting conditional branch histories")
     return True
 
 
