@@ -91,6 +91,52 @@ class ScanTests(unittest.TestCase):
                 FakeClient(), 33121, read_page=lambda *_: ([conditional], False), now=NOW,
             )
 
+    def test_conditional_mixed_histories_fail_closed(self):
+        # Pinned SDK chooses yes.my_forecasts OR no.my_forecasts, even when
+        # the yes history list is empty. A no-only prior forecast must
+        # never be mistaken for an entirely unforecasted conditional.
+        def leaf(ident, old=False):
+            return {"id": ident, "status": "open",
+                    "my_forecasts": {"history": ([{"synthetic": True}] if old else [])}}
+        p = {
+            "id": 700,
+            "conditional": {
+                "condition": leaf(701), "condition_child": leaf(702),
+                "question_yes": leaf(703), "question_no": leaf(704, old=True),
+            },
+            "_synthetic_questions": [question(700)],
+        }
+        with self.assertRaisesRegex(IncompleteQuestionScan, "Conflicting conditional branch histories"):
+            scan_open_tournament(FakeClient(), 33121,
+                                 read_page=lambda *_: ([p], False), now=NOW)
+
+    def test_actual_six_get_metadata_pattern_replayed_offline(self):
+        # The approved Nov 7 read-only audit showed exactly these aggregate
+        # post counts: FutureEval [2,0,0] (one notebook + one question),
+        # MiniBench [0,0,0]. No real question data is retained here.
+        # The scanner should stop after 3+2 GETs, ignoring phantom next.
+        pages = {
+            (33121, 0): ([{"notebook": {"content": "synthetic"}}, post(141)], True),
+            (33121, 100): ([], True),
+            (33121, 200): ([], True),
+            ("minibench", 0): ([], True),
+            ("minibench", 100): ([], True),
+        }
+        calls = []
+        def read_page(tournament, offset):
+            calls.append((tournament, offset))
+            return pages[(tournament, offset)]
+        client = FakeClient()
+        future = scan_open_tournament(client, 33121, read_page=read_page, now=NOW)
+        mini = scan_open_tournament(client, "minibench", read_page=read_page, now=NOW)
+        self.assertEqual([q.id_of_question for q in future], [141])
+        self.assertFalse(future[0].already_forecasted)
+        self.assertEqual(mini, [])
+        self.assertEqual(calls, [
+            (33121, 0), (33121, 100), (33121, 200),
+            ("minibench", 0), ("minibench", 100),
+        ])
+
     def test_deduplicate_question_ids_and_preserve_forecast_status(self):
         p = post(4, old=True)
         pages = iter([([p], True), ([p, post(5)], False)])
@@ -237,6 +283,42 @@ class PinnedSDKCompatibilityTests(unittest.TestCase):
         )
         self.assertEqual([q.id_of_question for q in result], [9872, 9873])
         self.assertTrue(all(q.already_forecasted is False for q in result))
+
+
+    def test_pinned_sdk_parses_synthetic_conditional_without_network(self):
+        from forecasting_tools import MetaculusClient
+        def part(qid):
+            return {
+                "id": qid, "title": "Synthetic conditional component",
+                "type": "binary", "status": "open",
+                "open_time": "2026-11-01T00:00:00Z",
+                "scheduled_close_time": "2026-11-10T00:00:00Z",
+                "my_forecasts": {"history": [], "latest": None},
+            }
+        raw = {
+            "id": 9871,
+            "conditional": {
+                "id": 9872, "title": "Synthetic conditional",
+                "status": "open",
+                "open_time": "2026-11-01T00:00:00Z",
+                "scheduled_close_time": "2026-11-10T00:00:00Z",
+                "condition": part(9873), "condition_child": part(9874),
+                "question_yes": part(9875), "question_no": part(9876),
+            },
+            "projects": {
+                "tournament": [{"slug": "fall-futureeval-2026"}],
+                "default_project": {"id": 33121, "visibility": "normal"},
+                "category": [],
+            },
+        }
+        client = MetaculusClient(token="synthetic-offline-only")
+        scanned = scan_open_tournament(
+            client, 33121, read_page=lambda *_: ([raw], False), now=NOW,
+        )
+        self.assertEqual(len(scanned), 1)
+        self.assertEqual(scanned[0].id_of_question, 9872)
+        self.assertFalse(scanned[0].already_forecasted)
+        self.assertEqual(scanned[0].question_type, "conditional")
 
 
 class FakeResponse:
