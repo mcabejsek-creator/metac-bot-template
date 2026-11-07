@@ -7,6 +7,7 @@ on:
       - "tools/diagnose_question_selection_offline.py"
       - "tools/probe_open_questions_readonly.py"
       - "tools/probe_open_questions_authenticated.py"
+      - "tools/check_bulk_read_method_offline.py"
       - ".github/workflows/offline_question_selection_diagnostics.yaml"
 
 permissions:
@@ -45,3 +46,5 @@ jobs:
         run: poetry run python -B tools/probe_open_questions_readonly.py --self-check
       - name: Verify authorized GET probe shape (no network)
         run: poetry run python -B tools/probe_open_questions_authenticated.py --self-check
+      - name: Compare historical audit method to installed SDK offline
+        run: poetry run python -B tools/check_bulk_read_method_offline.py
