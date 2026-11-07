@@ -102,7 +102,7 @@ def main():
     if len(token) < 32:
         raise RuntimeError("Missing or implausibly short METACULUS_TOKEN")
     opener = urllib.request.build_opener(NoRedirect())
-    user = read_json(opener, token, f"/api/users/{args.user_id}/")
+    user = read_json(opener, token, f"/api/users/{args.user_id}/", {"acting_user": args.user_id})
     if not isinstance(user, dict) or user.get("id") != args.user_id:
         raise RuntimeError("API token did not verify the expected bot user ID")
 
@@ -116,7 +116,7 @@ def main():
     for page in range(MAX_PAGES):
         data = read_json(
             opener, token, "/api/posts/",
-            {"forecaster_id": args.user_id, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE},
+            {"acting_user": args.user_id, "forecaster_id": args.user_id, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE},
         )
         if not isinstance(data, dict) or not isinstance(data.get("results"), list):
             raise RuntimeError("Unexpected posts API shape; refusing to imply an empty history")
@@ -147,6 +147,9 @@ def main():
         if not items or (count is None and len(items) < PAGE_SIZE):
             complete_pagination = True
             break
+
+    if not seen_posts or my_forecasts_fields == 0 or nonnull_fields == 0:
+        raise RuntimeError("Metaculus did not supply verifiable bot forecast fields; refusing an empty-history conclusion")
 
     summary = {
         "audit_type": "read_only_account_forecast_inventory",
