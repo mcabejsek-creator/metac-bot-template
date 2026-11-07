@@ -6,14 +6,14 @@ on:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_second_page_retry_20261107.txt"
+      - ".github/trigger_final_first_page_watch_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run verified V2 GET second-page-only scan'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run final first-page-only Metaculus monitor smoke'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 3db2a483c7a3c4a1e48bad8ecb498c4e5de398f8
+          ref: 3edb4fe8265038ec68c9f22b1c11c36cf477a212
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -35,4 +35,4 @@ jobs:
       - name: Inspect only response shape and status counts with V2 auth; two GETs
         env:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
-        run: python -B tools/temporary_probe_open_api_shape_20261107.py
+        run: python -B tools/watch_open_metaculus_questions_readonly.py --check-public-open-posts
