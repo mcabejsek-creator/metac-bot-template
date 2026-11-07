@@ -1,3 +1,7 @@
+# Bezpečnostní aktualizace 7. 11. 2026
+
+Uživatelský souhlas z 7. listopadu uzavřel staré nejasné operace metodou **legacy-frozen-no-retries**, nikoli retrospektivním potvrzením každého POST. [Podrobný plán](legacy-frozen-bootstrap-2026-11-07.md) má v otázce inicializace přednost před staršími historickými pokyny níže. Kód v `main` již používá `METACULUS_TOKEN_V2` a opravy z PR #3. **Žurnál dosud nebyl založen; živé publikování není povoleno.**
+
 # Bezpečné zavedení do GitHub Actions
 
 Příprava dne 2026-11-06 (Europe/Prague), větev `prep/github-actions-rollout`,
@@ -84,7 +88,7 @@ v UI je souhlasem jeho vědomá akce. Žádný z budoucích kroků se neprovád�
 | 4. Offline Actions | **Vy / já po souhlasu:** Actions → Offline release check → Run workflow; zadat plnou schválenou SHA. Ověřit SHA v logu, Python 3.11, zelený výsledek a JSON artefakt. Živý bot stále běží beze změny. | **Ano**, spuštění skutečného Actions jobu. |
 | 5. Pauza starých writerů | **Vy / já po zvláštním souhlasu:** zakázat nové běhy všech tří publisherů, odstranit queued staré běhy, nechat aktivní doběhnout; při nutném cancelu vyjasnit nejasné POSTy. Zastavit také lokální/jiné repo writery stejného účtu. | **Ano**, výslovně zásah do živého provozu. |
 | 6. Přepnutí kódu | **Vy / já po souhlasu:** znovu ověřit aktuální main; zachovat novější změny, případné konflikty rozhodnout s vámi. Teprve při vypnutých publisherech zavést celý schválený celek, ověřit finální SHA a offline testy. | **Ano**, plný merge / nasazení kódu. |
-| 7. Inicializace | **Vy / já po souhlasu:** pouze pokud stav dosud nikdy neexistoval, spustit Initialize publication state z nové main s `all-prior-runs-reconciled`. Offline gate na 3.11 musí projít. Ověřit nový ref a šifrovaný index; žádný Metaculus forecast se neposílá. | **Ano**, skutečný zápis do stavové větve GitHubu. |
+| 7. Inicializace | **Vy / já pouze po dalším výslovném souhlasu:** při neexistující stavové větvi spustit `Initialize publication state` s `legacy-frozen-no-retries`. Tento podpis znamená **trvale neopakovat staré nejasné pokusy**, nikoliv tvrdit, že jsou všechny historické výsledky známé. Předpokládá bezpečnostně uzavřené staré writery, nové stabilní V2 tajemství a prošlé offline regresní testy. | **Ano**, nový šifrovaný zápis do GitHubu; **bez** forecastu na Metaculus. |
 | 8. První skutečné publikování | **Vy / já po novém výslovném souhlasu:** povolit jen tournament a spustit jeden ruční běh z ověřené SHA. Cup/Test zatím vypnuté. Ověřit nové confirmed checkpointy a forecast/comment na Metaculus. Jde o původní oba turnaje, ne canary jediné otázky. | **Ano**, zvlášť souhlas s reálnými API a publikováním. |
 | 9. Obnovení další automatiky | **Vy / já po souhlasu:** po vyhodnocení teprve povolit schválené další publishery. Cup zachovává vlastní cron a nové samostatné run ID záměrně přeforecastovává. Test Bot také publikuje. | **Ano**, obnovení živých běhů / automatiky. |
 
@@ -101,7 +105,7 @@ v UI je souhlasem jeho vědomá akce. Žádný z budoucích kroků se neprovád�
   obecně omezená jen na jediný soubor; konkrétní pravidla musí zkontrolovat vlastník.
 - **Existující Secrets a billing:** stabilní skutečný `METACULUS_TOKEN` má alespoň
   32 znaků a patří stejnému účtu ve všech writerech; existující Perplexity a
-  OpenRouter nastavení/kredity jsou funkční. Nový Secret se nezavádí a token se
+- **Existující Secrets a billing:** platný `METACULUS_TOKEN_V2` patří účtu Vrchcab (ověřeno API GET); původní `METACULUS_TOKEN` byl po rotaci odmítnut (HTTP 403) a nesmí být v žádném publikujícím workflow. Šifrování nového žurnálu bude odvozeno z V2, takže **po inicializaci bez migračního plánu token již nerotovat**. Perplexity, OpenRouter a další placené zdroje se používají až při samostatně schváleném ostrém běhu.
   při cutover nerotuje: jeho změna mění také šifrovací klíč žurnálu.
 - **Actions → všichni publishery:** tournament, Cup, Test Bot; zkontrolovat také
   běhy z jiných větví a starých SHA. Zakázání workflow samo neodvolá již probíhající
