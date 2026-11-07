@@ -29,12 +29,12 @@ class FakeOpener:
 
 
 class PublicWatchTests(unittest.TestCase):
-    def test_get_contract_no_token_or_user_history(self):
+    def test_get_contract_uses_readonly_auth_without_user_history(self):
         watch.self_check()
         for _, project in watch.TARGETS:
-            req = watch.make_request(project)
+            req = watch.make_request(project, "x" * 48)
             self.assertEqual(req.get_method(), "GET")
-            self.assertFalse(req.has_header("Authorization"))
+            self.assertEqual(req.get_header("Authorization"), "Token " + "x" * 48)
             self.assertNotIn("acting_user", req.full_url)
         self.assertEqual(len(watch.TARGETS), 2)
 
@@ -46,7 +46,7 @@ class PublicWatchTests(unittest.TestCase):
         output = io.StringIO()
         with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
              patch.object(watch.time, "sleep"), \
-             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": "", "METACULUS_TOKEN": "x" * 48}), \
              contextlib.redirect_stdout(output):
             watch.check()
         report = json.loads(next(line for line in output.getvalue().splitlines() if line.startswith("{")))
@@ -63,7 +63,7 @@ class PublicWatchTests(unittest.TestCase):
         out = io.StringIO()
         with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
              patch.object(watch.time, "sleep"), \
-             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": "", "METACULUS_TOKEN": "x" * 48}), \
              contextlib.redirect_stdout(out):
             watch.check()
         report = json.loads(next(s for s in out.getvalue().splitlines() if s.startswith("{")))
@@ -75,7 +75,7 @@ class PublicWatchTests(unittest.TestCase):
             opener = FakeOpener([{"results": [{"title": "DONT_STORE"}]}, {"results": []}])
             with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
                  patch.object(watch.time, "sleep"), \
-                 patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": handle.name}), \
+                 patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": handle.name, "METACULUS_TOKEN": "x" * 48}), \
                  contextlib.redirect_stdout(io.StringIO()):
                 watch.check()
             with open(handle.name, encoding="utf-8") as document:
@@ -84,9 +84,29 @@ class PublicWatchTests(unittest.TestCase):
             self.assertNotIn("DONT_STORE", contents)
             self.assertIn("not", contents.lower())
 
+    def test_missing_credential_fails_before_any_http_attempt(self):
+        opener = FakeOpener([{"results": []}, {"results": []}])
+        with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
+             patch.dict(os.environ, {"METACULUS_TOKEN": "", "GITHUB_STEP_SUMMARY": ""}):
+            with self.assertRaisesRegex(RuntimeError, "credential"):
+                watch.check()
+        self.assertEqual(opener.requests, [])
+
+    def test_credential_value_never_appears_in_report(self):
+        token = "SENSITIVE_SYNTHETIC_TOKEN_" + "x" * 40
+        opener = FakeOpener([{"results": []}, {"results": [{}]}])
+        output = io.StringIO()
+        with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
+             patch.object(watch.time, "sleep"), \
+             patch.dict(os.environ, {"METACULUS_TOKEN": token, "GITHUB_STEP_SUMMARY": ""}), \
+             contextlib.redirect_stdout(output):
+            watch.check()
+        self.assertNotIn(token, output.getvalue())
+        self.assertTrue(all(req.get_header("Authorization") == "Token " + token for req in opener.requests))
+
     def test_refuses_unknown_project(self):
         with self.assertRaisesRegex(RuntimeError, "Unexpected project"):
-            watch.make_request("bot-testing-area")
+            watch.make_request("bot-testing-area", "x" * 48)
 
     def test_detects_pagination_instead_of_false_complete_count(self):
         for data in (
@@ -107,14 +127,14 @@ class PublicWatchTests(unittest.TestCase):
         error = urllib.error.HTTPError("https://www.metaculus.com/api/posts/", 429, "Too Many", {}, None)
         opener = FakeOpener([error, {"results": []}])
         with self.assertRaisesRegex(RuntimeError, "429"):
-            watch.fetch_one(opener, "33121")
+            watch.fetch_one(opener, "33121", "x" * 48)
         self.assertEqual(len(opener.requests), 1)
 
     def test_first_query_error_stops_before_second(self):
         error = urllib.error.HTTPError("https://www.metaculus.com/api/posts/", 500, "Server Error", {}, None)
         opener = FakeOpener([error, {"results": []}])
         with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
-             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}):
+             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": "", "METACULUS_TOKEN": "x" * 48}):
             with self.assertRaisesRegex(RuntimeError, "500"):
                 watch.check()
         self.assertEqual(len(opener.requests), 1)
@@ -123,15 +143,15 @@ class PublicWatchTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Redirect refused"):
             watch.NoRedirect().redirect_request(None, None, 302, "redirect", {}, "https://evil.example/")
 
-    def test_all_requests_without_auth_header(self):
+    def test_all_requests_authenticated_but_never_log_token(self):
         opener = FakeOpener([{"results": [{}]}, {"results": [{}]}])
         with patch.object(watch.urllib.request, "build_opener", return_value=opener), \
              patch.object(watch.time, "sleep"), \
-             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+             patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": "", "METACULUS_TOKEN": "x" * 48}), \
              contextlib.redirect_stdout(io.StringIO()):
             watch.check()
         self.assertEqual(len(opener.requests), 2)
-        self.assertTrue(all(not request.has_header("Authorization") for request in opener.requests))
+        self.assertTrue(all(request.get_header("Authorization") == "Token " + "x" * 48 for request in opener.requests))
 
 
 if __name__ == "__main__":
