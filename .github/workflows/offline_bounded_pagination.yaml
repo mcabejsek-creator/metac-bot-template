@@ -1,0 +1,51 @@
+# PR-only validation of bounded open-question pagination.
+# No credentials, Metaculus GET/POST, or paid model requests.
+name: Bounded pagination offline safety (no publishing)
+
+on:
+  pull_request:
+    paths:
+      - "main.py"
+      - "bounded_open_question_selection.py"
+      - "tests/test_bounded_open_question_selection.py"
+      - ".github/workflows/offline_bounded_pagination.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      PERPLEXITY_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      ASKNEWS_API_KEY: ""
+      ASKNEWS_CLIENT_ID: ""
+      ASKNEWS_SECRET: ""
+      GITHUB_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install locked dependencies without executing bot
+        run: poetry install --no-interaction --no-root
+      - name: Static syntax and source checks
+        run: poetry run python -B -m py_compile main.py bounded_open_question_selection.py tests/test_bounded_open_question_selection.py
+      - name: Synthetic regression tests with socket-level network guard
+        run: poetry run python -B -m tests.test_bounded_open_question_selection
+      - name: Existing publisher and forecasting offline regressions
+        env:
+          METACULUS_PUBLICATION_BACKEND: github
+        run: poetry run python -B -m tests.run --strict-known-bugs --report offline-results.json
