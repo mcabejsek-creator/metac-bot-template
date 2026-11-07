@@ -135,9 +135,11 @@ def _is_eligible(question, now):
 def scan_open_tournament(client, tournament, *, read_page, now=None, max_pages=MAX_PAGES_PER_TOURNAMENT):
     """Return complete validated available questions or raise, never partial data.
 
-    The API has returned a non-null 'next' even on empty pages. Consequently we
-    do NOT infer end of inventory from an empty page; only next=None proves
-    completion. Exhausting the fixed page budget is a hard failure.
+    The CountlessLimitOffsetPagination API advertises 'next' beyond the end
+    (Django count=infinity). Two consecutive raw empty pages establish the
+    observed terminal condition; one empty page is NOT terminal, so sparse
+    anomalies do not immediately hide later offset pages. A fully occupied
+    page budget without an observed end is a hard failure.
     """
     if tournament not in SUPPORTED_TOURNAMENTS:
         raise IncompleteQuestionScan("Unsupported tournament")
@@ -146,10 +148,14 @@ def scan_open_tournament(client, tournament, *, read_page, now=None, max_pages=M
     now = now or datetime.now(timezone.utc)
     now = utc_date(now)
     found = {}
+    consecutive_empty_pages = 0
     for page in range(max_pages):
         rows, more = read_page(tournament, page * PAGE_SIZE)
         if not isinstance(rows, list) or type(more) is not bool:
             raise IncompleteQuestionScan("Invalid page transport response")
+        if len(rows) > PAGE_SIZE or any(not isinstance(post, dict) for post in rows):
+            raise IncompleteQuestionScan("Invalid post page")
+        consecutive_empty_pages = consecutive_empty_pages + 1 if not rows else 0
         for post in rows:
             if not _validate_history(post):
                 continue
@@ -170,9 +176,9 @@ def scan_open_tournament(client, tournament, *, read_page, now=None, max_pages=M
                         raise IncompleteQuestionScan("Conflicting question history across pages")
                     continue
                 found[qid] = question
-        if not more:
+        if not more or consecutive_empty_pages >= 2:
             return list(found.values())
-    raise IncompleteQuestionScan("Pagination still indicates more posts at fixed GET cap")
+    raise IncompleteQuestionScan("Pagination did not reach two empty pages within fixed GET cap")
 
 
 def deduplicate_tournaments(first, second):
