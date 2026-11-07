@@ -31,3 +31,16 @@ Toto je **návrh**, nikoli už provedený krok:
 ## Stav při vytvoření tohoto souboru
 
 **Go for offline preparation; NO-GO for automatic publishing.** Žádný nový Metaculus GET, POST, iniciační zápis, restart cron ani pozměnění `main` nebylo součástí tohoto dokumentu.
+
+## Inicializace nového žurnálu — provedena a ověřena 7. 11. 2026
+
+Uživatel samostatně schválil **pouze** vytvoření nového šifrovaného GitHub žurnálu, bez Metaculus publikování. Po nasazení PR #4 do `main` (`f77f2329e9c09e787333416300ae35fa02f240a0`) byl spuštěn jednorázový [GitHub Actions běh 42378368496](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42378368496), jehož checkout byl pevně ukotven na této SHA. Použit pouze tajný `METACULUS_TOKEN_V2`; hodnoty tokenů nebyly zveřejněny.
+
+- **5/5** offline kontrol tajemství a **278/278** regresních testů, **0 unexpected live attempts**.
+- Větve `metaculus-publication-state` dříve nebylo; API inicializátoru provedlo pouze vytvoření nového orphan refu s jedním šifrovaným souborem `publication.enc`.
+- Následný `configured_store().preflight()` úspěšně autentizoval a dešifroval manifest. Při nezávislé GitHub kontrole: ref `02e324f9045952ed00b0a1bb5058ded4d39178e6`, samotný soubor **239 bajtů**, JSON obálka se `version=1` a polem `data` (ciphertext). V Git větvi nejsou žádné workflow ani jiné zdrojové soubory a commit je orphan bez rodičů.
+- Jednorázový spouštěcí YAML a marker byly po provedení odstraněny z dočasné ops větve. `main` se nezměnil; starý run `34463156990` je stále `queued`; žádné další aktivní jobs nejsou.
+- **Pozor:** GitHub označuje stavovou větev jako `protected: false`. Před živým provozem je vhodné nastavit pravidlo proti mazání a force-pushi stavové větve, **aniž by zablokovalo přímé checkpoint commity GitHub Actions**. Tento krok zatím proveden nebyl.
+- **Žádný ostrý forecast, komentář, modelová API útrata ani obnovení cron-job.org nebyly autorizovány nebo spuštěny.**
+
+Další věcný milník: ochrana stavové větve a potom samostatně schválený, sledovaný jednorázový `tournament` run. Po dobu dalších příprav udržovat `Test Bot`, `Cup` a externí trigger vypnuté. Historické nedoložené pokusy zůstanou trvale neobnovené, nový šifrovaný manifest výslovně přiznává `not-fully-reconciled`.
