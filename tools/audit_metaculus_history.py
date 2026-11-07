@@ -122,10 +122,13 @@ def main():
             if post["id"] not in seen_posts:
                 seen_posts.add(post["id"])
                 ids.update(question_ids(post))
+        # Metaculus uses CountlessLimitOffsetPagination: "next" can stay
+        # non-null even after the last record (the count is infinite).
+        # An empty results page is therefore the reliable end marker.
+        if not posts:
+            break
         if data.get("next") is None:
             break
-        if not posts:
-            raise RuntimeError("Posts-feed pagination did not advance")
     else:
         raise RuntimeError("Posts-feed exceeded safe page limit")
 
