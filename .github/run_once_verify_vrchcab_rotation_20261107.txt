@@ -1,0 +1,1 @@
+User just confirmed saving METACULUS_TOKEN_V2. Verify only identity GET for new Vrchcab token and revoked old secret; at most one GET per secret; no forecasts, comments, token changes or LLMs.
