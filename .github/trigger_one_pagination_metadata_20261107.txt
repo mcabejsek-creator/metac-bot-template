@@ -1,1 +1,0 @@
-Read-only authenticated two-GET inspection of next response metadata; no IDs, forecasts, token value or model calls.
