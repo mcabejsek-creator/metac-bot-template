@@ -1,6 +1,6 @@
 """One explicitly approved authenticated GET identifying the GitHub Metaculus token.
 
-Only GET /api/users/me.  Never publishes, changes a token, posts a comment,
+Only GET /api/users/me/. Never publishes, changes a token, posts a comment,
 accesses other endpoints, logs credentials or sends any model request.
 --self-check uses no network. Live mode is opt-in and single-use in CI.
 """
@@ -11,7 +11,7 @@ import sys
 import urllib.error
 import urllib.request
 
-API_URL = "https://www.metaculus.com/api/users/me"
+API_URL = "https://www.metaculus.com/api/users/me/"
 BOT_USER_ID = 307558
 MAIN_USERNAME = "michalcabejsek"
 BOT_USERNAME = "vrchcab"
@@ -70,7 +70,7 @@ def self_check():
     assert classify({"id": BOT_USER_ID, "username": "Vrchcab"}) == "BOT_VRCHCAB"
     assert classify({"id": 42, "username": "MichalCabejsek"}) == "MAIN_MICHALCABEJSEK"
     assert classify({"id": 43, "username": "AnotherUser"}) == "OTHER_OR_UNRECOGNIZED_ACCOUNT"
-    print("Offline self-check OK: exactly one authenticated GET to /api/users/me, no network")
+    print("Offline self-check OK: exactly one authenticated GET to /api/users/me/, no network")
 
 
 def run():
