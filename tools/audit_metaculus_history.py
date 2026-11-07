@@ -1,7 +1,7 @@
-"""Read-only, aggregate-only audit of the acting Metaculus bot's own forecasts.
+"""Read-only Metaculus bot history audit; never stores raw forecasts or question IDs.
 
-No forecast/comment values, private text, tokens, or per-question IDs are written.
-This is an inventory, NOT a reliable reconciliation of pre-existing POST attempts.
+Posts feed discovers candidate question IDs; documented GET bulk-forecast-read
+retrieves the acting bot's forecast history. This is NOT publication reconciliation.
 """
 import argparse
 import json
@@ -14,46 +14,46 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HOST = "https://www.metaculus.com"
+BOT_ID = 307558
 PAGE_SIZE = 100
 MAX_PAGES = 200
+BATCH_SIZE = 40
+QUESTION_KINDS = {"binary", "multiple_choice", "numeric", "discrete", "date"}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        raise RuntimeError("Metaculus redirected the audit request; refusing to forward credentials")
+        raise RuntimeError("Redirect refused; credentials were not forwarded")
 
 
-def read_json(opener, token, path, params=None):
-    url = HOST + path
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
+def get_json(opener, token, path, params=()):
+    query = urllib.parse.urlencode(params)
+    url = HOST + path + (("?" + query) if query else "")
     request = urllib.request.Request(
-        url,
-        headers={"Authorization": "Token " + token, "Accept": "application/json"},
+        url, headers={"Authorization": "Token " + token, "Accept": "application/json"},
         method="GET",
     )
     try:
         with opener.open(request, timeout=25) as response:
             if response.status != 200:
                 raise RuntimeError("Unexpected Metaculus API response")
-            raw = response.read(15_000_000 + 1)
+            raw = response.read(15_000_001)
             if len(raw) > 15_000_000:
-                raise RuntimeError("Response size exceeded safe limit")
+                raise RuntimeError("API response exceeds safe size limit")
             return json.loads(raw)
     except urllib.error.HTTPError as exc:
-        # Do not print response bodies, cookies, headers, or tokens.
-        raise RuntimeError(f"Metaculus API returned HTTP {exc.code}; no history saved") from None
+        raise RuntimeError(f"Metaculus API HTTP {exc.code}; no data exported") from None
     except urllib.error.URLError:
-        raise RuntimeError("Metaculus API network/TLS error; no history saved") from None
+        raise RuntimeError("Metaculus API network/TLS failure; no data exported") from None
 
 
-def to_utc(value):
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+def timestamp(value):
+    if isinstance(value, (float, int)) and not isinstance(value, bool):
         try:
             return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
-        except (OverflowError, ValueError, OSError):
+        except (ValueError, OverflowError, OSError):
             return None
-    if isinstance(value, str) and value:
+    if isinstance(value, str):
         try:
             return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
         except ValueError:
@@ -61,126 +61,145 @@ def to_utc(value):
     return None
 
 
-def find_my_forecasts(node):
-    """Visit nested group/conditional questions without copying their payloads."""
-    if isinstance(node, dict):
-        if "my_forecasts" in node:
-            yield node["my_forecasts"]
-        for key, child in node.items():
-            if key != "my_forecasts":
-                yield from find_my_forecasts(child)
-    elif isinstance(node, list):
-        for child in node:
-            yield from find_my_forecasts(child)
+def question_ids(post):
+    """Read ID fields only; do not process titles or forecast values."""
+    found = set()
 
+    def add(q):
+        if isinstance(q, dict):
+            qid = q.get("id")
+            if (isinstance(qid, int) and not isinstance(qid, bool) and qid > 0
+                    and q.get("type") in QUESTION_KINDS):
+                found.add(qid)
 
-def observed_times(node):
-    """Read only available forecast timestamps; never claim complete history."""
-    if isinstance(node, dict):
-        if "start_time" in node:
-            stamp = to_utc(node["start_time"])
-            if stamp is not None:
-                yield stamp
-        for key, value in node.items():
-            if key != "start_time":
-                yield from observed_times(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from observed_times(value)
+    add(post.get("question"))
+    group = post.get("group_of_questions")
+    if isinstance(group, dict):
+        for q in group.get("questions") or []:
+            add(q)
+    conditional = post.get("conditional")
+    if isinstance(conditional, dict):
+        for key in ("condition", "condition_child", "question_yes", "question_no"):
+            add(conditional.get(key))
+    return found
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Read-only aggregate Metaculus history audit")
+    parser = argparse.ArgumentParser(description="Aggregate-only audit, no forecasts posted")
     parser.add_argument("--user-id", type=int, required=True)
     parser.add_argument("--output", default="metaculus-audit-summary.json")
     args = parser.parse_args()
-    if args.user_id <= 0 or args.user_id != 307558:
-        raise RuntimeError("Unexpected bot user ID; audit pinned to Vrchcab (307558)")
+    if args.user_id != BOT_ID:
+        raise RuntimeError("Unexpected bot account")
     token = os.environ.get("METACULUS_TOKEN", "").strip()
     if token.startswith("Token "):
         token = token[6:].strip()
     if len(token) < 32:
-        raise RuntimeError("Missing or implausibly short METACULUS_TOKEN")
+        raise RuntimeError("METACULUS_TOKEN is missing or invalid in shape")
     opener = urllib.request.build_opener(NoRedirect())
-    user = read_json(opener, token, f"/api/users/{args.user_id}/", {"acting_user": args.user_id})
-    if not isinstance(user, dict) or user.get("id") != args.user_id:
-        raise RuntimeError("API token did not verify the expected bot user ID")
+    identity = get_json(opener, token, f"/api/users/{BOT_ID}/", (("acting_user", BOT_ID),))
+    if not isinstance(identity, dict) or identity.get("id") != BOT_ID:
+        raise RuntimeError("Unable to verify acting bot identity")
 
+    ids = set()
     seen_posts = set()
-    my_forecasts_fields = 0
-    nonnull_fields = 0
-    observations = 0
-    latest = None
-    page_count = 0
-    complete_pagination = False
+    pages = 0
+    # The posts feed identifies questions forecast by Vrchcab, including closed ones.
     for page in range(MAX_PAGES):
-        data = read_json(
-            opener, token, "/api/posts/",
-            {"acting_user": args.user_id, "forecaster_id": args.user_id, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE},
-        )
+        data = get_json(opener, token, "/api/posts/", (
+            ("acting_user", BOT_ID),
+            ("forecaster_id", BOT_ID),
+            ("limit", PAGE_SIZE),
+            ("offset", page * PAGE_SIZE),
+        ))
         if not isinstance(data, dict) or not isinstance(data.get("results"), list):
-            raise RuntimeError("Unexpected posts API shape; refusing to imply an empty history")
-        items = data["results"]
-        page_count += 1
-        for post in items:
-            if not isinstance(post, dict):
-                raise RuntimeError("Unexpected post type")
-            post_id = post.get("id")
-            if not isinstance(post_id, int):
-                raise RuntimeError("Post ID missing")
-            if post_id in seen_posts:
-                continue
-            seen_posts.add(post_id)
-            for field in find_my_forecasts(post):
-                my_forecasts_fields += 1
-                if field is not None:
-                    nonnull_fields += 1
-                    stamps = list(observed_times(field))
-                    observations += len(stamps)
-                    for stamp in stamps:
-                        if latest is None or stamp > latest:
-                            latest = stamp
-        count = data.get("count")
-        if isinstance(count, int) and page * PAGE_SIZE + len(items) >= count:
-            complete_pagination = True
+            raise RuntimeError("Unexpected posts-feed response structure")
+        posts = data["results"]
+        pages += 1
+        for post in posts:
+            if not isinstance(post, dict) or not isinstance(post.get("id"), int):
+                raise RuntimeError("Unexpected posts-feed item")
+            if post["id"] not in seen_posts:
+                seen_posts.add(post["id"])
+                ids.update(question_ids(post))
+        if data.get("next") is None:
             break
-        if not items or (count is None and len(items) < PAGE_SIZE):
-            complete_pagination = True
-            break
+        if not posts:
+            raise RuntimeError("Posts-feed pagination did not advance")
+    else:
+        raise RuntimeError("Posts-feed exceeded safe page limit")
 
-    if not seen_posts or my_forecasts_fields == 0 or nonnull_fields == 0:
-        raise RuntimeError("Metaculus did not supply verifiable bot forecast fields; refusing an empty-history conclusion")
+    if not seen_posts:
+        raise RuntimeError("Posts API returned no bot-forecasted posts; refusing a zero-history claim")
+    if not ids:
+        raise RuntimeError("Posts API did not identify any question IDs to audit")
+    if len(ids) > 20000:
+        raise RuntimeError("Too many question IDs for safe auditing")
 
+    question_count = 0
+    forecast_count = 0
+    oldest = None
+    newest = None
+    ordered_ids = sorted(ids)
+    # GET bulk-forecast-read returns the acting user's full history by question ID.
+    for index in range(0, len(ordered_ids), BATCH_SIZE):
+        batch = ordered_ids[index:index + BATCH_SIZE]
+        params = [("acting_user", BOT_ID)] + [("question_ids", qid) for qid in batch]
+        result = get_json(opener, token, "/api/questions/bulk-forecast-read/", params)
+        if not isinstance(result, dict) or not isinstance(result.get("results"), list):
+            raise RuntimeError("Unexpected bulk forecast response structure")
+        returned = set()
+        for item in result["results"]:
+            if not isinstance(item, dict) or not isinstance(item.get("question_id"), int):
+                raise RuntimeError("Unexpected bulk forecast item")
+            qid = item["question_id"]
+            if qid not in batch or qid in returned:
+                raise RuntimeError("Bulk forecast returned unexpected question")
+            returned.add(qid)
+            forecasts = item.get("forecasts")
+            if not isinstance(forecasts, list):
+                raise RuntimeError("Missing bulk forecast history")
+            if forecasts:
+                question_count += 1
+            forecast_count += len(forecasts)
+            for forecast in forecasts:
+                if not isinstance(forecast, dict):
+                    raise RuntimeError("Unexpected forecast record")
+                author = forecast.get("author_id")
+                if author is not None and author != BOT_ID:
+                    raise RuntimeError("Returned forecast did not belong to acting bot")
+                at = timestamp(forecast.get("start_time"))
+                if at is not None:
+                    oldest = at if oldest is None or at < oldest else oldest
+                    newest = at if newest is None or at > newest else newest
+
+    if forecast_count == 0:
+        raise RuntimeError("Bulk API returned no forecasts for bot-filtered posts; no report saved")
     summary = {
-        "audit_type": "read_only_account_forecast_inventory",
-        "bot_user_id": args.user_id,
+        "audit_type": "read_only_bot_forecast_inventory",
+        "bot_user_id": BOT_ID,
         "scanned_at_utc": datetime.now(timezone.utc).isoformat(),
-        "pages_read": page_count,
-        "unique_forecasted_posts_returned": len(seen_posts),
-        "my_forecasts_fields_seen": my_forecasts_fields,
-        "nonnull_my_forecasts_fields": nonnull_fields,
-        "forecast_timestamps_observed": observations,
-        "latest_observed_forecast_utc": latest,
-        "pagination_complete": complete_pagination,
-        "historical_coverage": "unknown (API may return latest forecast only, omit older history, or null restricted fields)",
+        "posts_returned": len(seen_posts),
+        "question_ids_examined": len(ids),
+        "questions_with_history": question_count,
+        "forecast_records_found": forecast_count,
+        "earliest_observed_forecast_utc": oldest,
+        "latest_observed_forecast_utc": newest,
+        "history_coverage_note": "Only questions in the filtered posts feed; missing or hidden posts may be omitted",
         "reconciliation_ready": False,
         "contains_forecast_values_or_question_ids": False,
     }
-    if not complete_pagination:
-        raise RuntimeError("Page cap reached; no report saved because inventory is incomplete")
-    output = Path(args.output)
-    if output.is_absolute() or output.name != str(output):
-        raise RuntimeError("Output must be a filename in the working directory")
-    output.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print("Metaculus audit completed; aggregate-only report saved.")
-    print(f"Forecasted posts: {len(seen_posts)}; last visible forecast: {latest or 'unavailable'}")
-    print("Do not use this report alone to declare old publication attempts reconciled.")
+    path = Path(args.output)
+    if path.name != str(path):
+        raise RuntimeError("Output must be a local filename")
+    path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Read-only audit complete: {question_count} questions, {forecast_count} historical records.")
+    print("This inventory is not proof that any uncertain earlier publication attempt is resolved.")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        # No response bodies, token, or raw forecast data in the logs.
-        print(f"Audit failed safely: {exc}", file=sys.stderr)
+        print(f"Audit stopped safely: {exc}", file=sys.stderr)
         sys.exit(1)
