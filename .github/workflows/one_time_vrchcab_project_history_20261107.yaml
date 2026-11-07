@@ -1,0 +1,36 @@
+# Single-use, user-approved 2 GET read-only inventory on 2026-11-07.
+# Never schedules, posts forecasts, or accesses model API credentials.
+name: One-time Vrchcab project forecast history GET audit
+
+on:
+  push:
+    branches:
+      - diagnostics/open-questions-offline-20261107
+    paths:
+      - ".github/trigger_one_time_vrchcab_history_20261107.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  two_project_gets:
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run approved two project history GETs once'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout pinned reviewed diagnostic code
+        uses: actions/checkout@v4
+        with:
+          ref: 4ee6f3720ddf80ac708bc2f7792fcb74a81d2bc2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Offline verification of the two authorized GET query shapes
+        run: python -B tools/project_history_inventory_readonly.py --self-check
+      - name: Offline tests with synthetic histories and HTTP 429
+        run: python -B tools/test_project_history_inventory_offline.py
+      - name: Exactly two project-scoped read-only GETs at most
+        run: python -B tools/project_history_inventory_readonly.py --run-two-project-gets
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
