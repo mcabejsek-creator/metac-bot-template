@@ -1,0 +1,59 @@
+# A public Metaculus read-only watch. It NEVER publishes, calls LLMs, or reads bot secrets.
+# Schedule only operates on default branch after separate merge approval.
+# Results appear in Actions step summary; GitHub notifications are not guaranteed.
+name: Vrchcab public open-question watch (read only)
+
+on:
+  pull_request:
+    paths:
+      - "tools/watch_open_metaculus_questions_readonly.py"
+      - "tools/test_watch_open_metaculus_questions_readonly.py"
+      - ".github/workflows/watch_open_metaculus_questions_readonly.yaml"
+  workflow_dispatch:
+  schedule:
+    # 15-minute UTC cadence, offset from top of hour to limit GitHub scheduler load.
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vrchcab-public-watch-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  offline_safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate exactly two public GET request shapes (NO NETWORK)
+        run: python -B tools/watch_open_metaculus_questions_readonly.py --self-check
+      - name: Run all fail-closed synthetic tests (NO NETWORK)
+        run: python -B tools/test_watch_open_metaculus_questions_readonly.py
+
+  monitor:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: offline_safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Exactly two public Metaculus GET checks; candidate counts only
+        env:
+          METACULUS_TOKEN: ""
+          METACULUS_TOKEN_V2: ""
+          PERPLEXITY_API_KEY: ""
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+        run: python -B tools/watch_open_metaculus_questions_readonly.py --check-public-open-posts
