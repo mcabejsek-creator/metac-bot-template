@@ -5,8 +5,10 @@ has never forecast it or that an eligible question is currently available.
 Exactly 0-2 authenticated READ-ONLY HTTPS GETs. No POSTs, models, or publication.
 The Vrchcab token is read only from the GitHub secret environment, never logged.
 Unauthenticated GET returned HTTP 403 from GitHub Actions on 2026-11-07.
-On pagination ambiguity, HTTP 429, unexpected data or network errors: fail
-closed and do not report "zero questions".
+The SDK also searches only the first page by default. Metaculus may return
+next=offset100 even when the current page is empty. This watch explicitly
+reports ONLY the newest first page and NEVER concludes global absence.
+On HTTP 429, unexpected data or network errors: fail closed.
 """
 import argparse
 import json
@@ -72,11 +74,18 @@ def summarize(data):
     rows = data["results"]
     if len(rows) > FIRST_PAGE_LIMIT or not all(isinstance(p, dict) for p in rows):
         raise RuntimeError("Unexpected post data; no conclusion")
-    if data.get("next") is not None or len(rows) == FIRST_PAGE_LIMIT:
-        raise RuntimeError("Potential pagination; do not report incomplete count")
-    # Deliberately neither inspect nor disclose post IDs, titles, question
-    # IDs, descriptions, outcomes or user-specific forecast history.
-    return len(rows)
+    # SDK drops notebook posts before parsing questions. Never alert on one.
+    excluded_notebooks = sum("notebook" in row for row in rows)
+    # Do not trust next as a completion indicator: live API kept returning
+    # next=offset100/200 even when 0 project rows were returned.
+    # Deliberately neither inspect nor disclose IDs, titles, questions or forecasts.
+    return {
+        "first_page_raw_posts": len(rows),
+        "supported_post_candidates_first_page": len(rows) - excluded_notebooks,
+        "notebook_posts_excluded": excluded_notebooks,
+        "more_pages_indicated": bool(data.get("next")),
+        "global_coverage": False,
+    }
 
 
 def fetch_one(opener, project, token):
@@ -111,29 +120,30 @@ def check():
                 time.sleep(delay)
         before = time.monotonic()
         rows.append((label, fetch_one(opener, project, token)))
-    total = sum(n for _, n in rows)
+    total = sum(summary["supported_post_candidates_first_page"] for _, summary in rows)
     report = {
-        "watch": "public_read_only_first_page",
-        "projects": [{"project": name, "open_posts": count} for name, count in rows],
+        "watch": "authenticated_read_only_newest_first_page",
+        "projects": [{"project": name, **summary} for name, summary in rows],
         "open_candidates_found": total > 0,
         "requests": len(TARGETS),
         "bot_forecast_status_verified": False,
+        "complete_tournament_inventory": False,
         "publishes_forecasts": False,
         "authenticated_read_only": True,
-        "note": "Open public posts are candidates only; verify prior Vrchcab forecasts and eligibility before any live run.",
+        "note": "Only first 100 newest server-filtered posts per project checked; API may have more pages even if current one is empty. Candidate posts may be unsupported or previously forecasted.",
     }
     print(json.dumps(report, ensure_ascii=False), flush=True)
     summary_path = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as out:
             out.write("### Vrchcab read-only Metaculus monitor\n\n")
-            for name, count in rows:
-                out.write("- " + name + ": **" + str(count) + "** public open posts\n")
-            out.write("\nOpen posts are **not** proof of new, unforecasted questions. Authenticated GET only; no forecast, token value disclosure or paid models.\n")
+            for name, summary in rows:
+                out.write("- " + name + ": **" + str(summary["supported_post_candidates_first_page"]) + "** first-page candidate posts (excluded " + str(summary["notebook_posts_excluded"]) + " notebook posts)\n")
+            out.write("\n**Incomplete by design:** first 100 newest posts only. API may have additional pages, even when this page returns zero. Candidates are NOT proof of previously unforecasted questions. Authenticated GET only; no forecast or paid models.\n")
     if total:
-        print("::warning::Publicly open Metaculus posts detected; manually check Vrchcab history before forecasting.", flush=True)
+        print("::warning::First-page candidate posts detected; verify question eligibility and Vrchcab history before any live run.", flush=True)
     else:
-        print("No currently open posts returned by the two server-filtered first-page queries.", flush=True)
+        print("No supported candidate posts in newest FIRST PAGES; this does NOT establish absence on later pages.", flush=True)
 
 
 def self_check():
@@ -148,8 +158,9 @@ def self_check():
         assert "forecast_type" not in q
         assert r.get_method() == "GET"
         assert r.get_header("Authorization") == "Token " + "a" * 48
-    assert summarize({"results": []}) == 0
-    assert summarize({"results": [{}]}) == 1
+    assert summarize({"results": []})["supported_post_candidates_first_page"] == 0
+    assert summarize({"results": [{}]})["supported_post_candidates_first_page"] == 1
+    assert summarize({"results": [{"notebook": {}}], "next": "offset=100"})["supported_post_candidates_first_page"] == 0
     print("Offline request contract OK; no network used.")
 
 
