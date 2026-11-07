@@ -20,8 +20,6 @@ import urllib.request
 HOST = "www.metaculus.com"
 API_PATH = "/api/posts/"
 TARGETS = (("Fall FutureEval 2026", "33121"), ("MiniBench", "minibench"))
-FORECAST_TYPES = ("binary", "numeric", "multiple_choice", "date", "discrete",
-                  "conditional", "group_of_questions")
 FIRST_PAGE_LIMIT = 100
 MAX_BODY_BYTES = 15_000_000
 MIN_REQUEST_SPACING = 6.0
@@ -52,7 +50,9 @@ def make_request(project, token):
         ("include_conditional_cps", "true"),
         ("statuses", "open"),
         ("tournaments", project),
-    ] + [("forecast_type", kind) for kind in FORECAST_TYPES]
+    ]
+    # Match SDK get_all_open_questions_from_tournament: allowed_types is None,
+    # so DO NOT pass a forecast_type filter or change server search semantics.
     query = urllib.parse.urlencode(params)
     req = urllib.request.Request(
         "https://" + HOST + API_PATH + "?" + query,
@@ -145,7 +145,7 @@ def self_check():
         assert q["tournaments"] == [project]
         assert q["statuses"] == ["open"]
         assert q["offset"] == ["0"] and q["limit"] == [str(FIRST_PAGE_LIMIT)]
-        assert q["forecast_type"] == list(FORECAST_TYPES)
+        assert "forecast_type" not in q
         assert r.get_method() == "GET"
         assert r.get_header("Authorization") == "Token " + "a" * 48
     assert summarize({"results": []}) == 0
