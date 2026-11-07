@@ -204,16 +204,28 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
     async def test_both_tournaments_share_one_total_budget(self):
         bot = self.bot()
         calls, observed = [], self.timeout_probe()
+        identifiers = [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID]
+        scan_completed = []
 
-        async def forecast(identifier, return_exceptions):
-            self.assertTrue(return_exceptions)
-            calls.append(identifier)
+        def scan(client, identifier, *, read_page):
+            self.assertIs(client, bot.metaculus_client)
+            scan_completed.append(identifier)
             return [identifier]
 
-        self.start_patch(patch.object(bot, "forecast_on_tournament", forecast))
+        async def forecast(questions, return_exceptions):
+            self.assertTrue(return_exceptions)
+            # All read-only scans must have succeeded before forecasting starts.
+            self.assertEqual(scan_completed, identifiers)
+            calls.extend(questions)
+            return list(questions)
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
         reports = await app.forecast_for_mode(bot, "tournament")
-        self.assertEqual(calls, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
-        self.assertEqual(reports, calls)
+        self.assertEqual(calls, identifiers)
+        self.assertEqual(reports, identifiers)
         self.assertEqual(sum(budget == 10800 for budget, _ in observed), 1)
 
     async def test_run_deadline_also_covers_tournament_retrieval(self):
