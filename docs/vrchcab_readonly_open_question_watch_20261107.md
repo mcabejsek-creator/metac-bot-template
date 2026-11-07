@@ -5,12 +5,12 @@ Stav: 7. listopadu 2026. **Připraveno jen na samostatné vývojové větvi; bez
 ## Co přesně hlídač dělá
 
 - Pokud bude návrh schválen a sloučen do `main`, GitHub Actions může spouštět čtecí kontrolu každých cca **15 minut** (GitHub cron: `7,22,37,52 * * * *`, UTC). GitHub negarantuje přesné spuštění na minutu; může docházet ke zpožděním.
-- Každá kontrola má nejvýše dva veřejné GET požadavky `/api/posts/`, po jednom pro **Fall FutureEval (33121)** a **MiniBench (minibench)**, s filtrem `statuses=open` a prvním stránkovaným seznamem 100 příspěvků. Mezi dotazy je odstup minimálně 6 sekund; bez retry, bez přesměrování, bez dalších URL.
-- Nepoužívá `METACULUS_TOKEN`, `METACULUS_TOKEN_V2`, žádné jiné GitHub secrets ani placené modelové API. Nepublikuje forecasty nebo komentáře. Github workflow má **`permissions: contents: read`** a nepoužívá publikační žurnál.
+- Každá kontrola má nejvýše dva autentizované, výhradně čtecí GET požadavky `/api/posts/`, po jednom pro **Fall FutureEval (33121)** a **MiniBench (minibench)**, s filtrem `statuses=open` a prvním stránkovaným seznamem 100 příspěvků. Mezi dotazy je odstup minimálně 6 sekund; bez retry, bez přesměrování, bez dalších URL.
+- Používá pouze existující GitHub secret `METACULUS_TOKEN_V2` jako hlavičku **Authorization** při čtení Metaculus. Jeho hodnotu nezapisuje ani neposílá jinému serveru. Nepoužívá žádné placené modelové API a nepřidává předpovědi nebo komentáře. GitHub workflow má **`permissions: contents: read`**, nepoužívá publikační žurnál a v PR offline testech nemá žádný secret.
 - V GitHub Actions se vypíše pouze počet veřejně otevřených příspěvků v každé soutěži. Pokud nějaké existují, vypíše se **varování** (workflow annotation) a zpráva do shrnutí běhu. Nepřenáší se ID, názvy nebo prognózy.
 - **Otevřená otázka není automaticky otázka, kterou bot ještě nepředpověděl.** Hlídač záměrně nepoužívá identitu bota pro kontrolu historie. Každý pozitivní nález vyžaduje následné bezpečné ověření a zvláštní schválení ostrého běhu.
 - Pokud API vrátí chybu, HTTP 429, změněné JSON schéma nebo možnou další stránku, kontrola skončí neúspěchem s **nejistým výsledkem**, nikoli tvrzením, že není co předpovídat.
-- Na pull requestech se spouští **pouze offline syntax/request-contract a syntetické testy**. GET na Metaculus proběhne teprve při ručním `workflow_dispatch` nebo rozvrhu na `main`.
+- Na pull requestech se spouští **pouze offline syntax/request-contract a syntetické testy**. Autentizovaný GET na Metaculus proběhne teprve při ručním `workflow_dispatch` nebo rozvrhu na `main`. Původní předpoklad, že postačí veřejné GET bez tokenu, byl vyvrácen živým testem: [test 42382715942](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42382715942) skončil HTTP 403 **bez tokenu**, tedy bez jakéhokoli přístupu k soukromé identitě bota.
 
 ## Upozorňování a jeho hranice
 
@@ -25,4 +25,4 @@ GitHub repo aktuálně vykazuje `has_issues=false`, takže nelze využít standa
 
 ## Jak ověřit
 
-Otevřít `Actions → Vrchcab public open-question watch (read only)`. Ručně spustit pouze tento čtecí workflow, nebo po merge sledovat rozvrh a souhrny. Nikdy nevyhodnocovat červený výsledek (HTTP chybu/paginaci) jako nulovou dostupnost.
+Otevřít `Actions → Vrchcab authenticated open-question watch (read only)`. Ručně spustit pouze tento čtecí workflow, nebo po merge sledovat rozvrh a souhrny. Nikdy nevyhodnocovat červený výsledek (HTTP chybu/paginaci) jako nulovou dostupnost.
