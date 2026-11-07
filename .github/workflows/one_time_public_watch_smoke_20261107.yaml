@@ -6,14 +6,14 @@ on:
     branches:
       - prep/read-only-question-watch-20261107
     paths:
-      - ".github/trigger_one_aggregate_api_shape_20261107.txt"
+      - ".github/trigger_one_pagination_metadata_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   public_two_get:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one aggregate-only V2-authenticated Metaculus response-shape probe'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run one V2 GET metadata-only pagination check'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 449b768ad65de6ac0ba3976d14d858a8b0c2776c
+          ref: 07b2f7a83efadff860b780d512af3715ee095056
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
