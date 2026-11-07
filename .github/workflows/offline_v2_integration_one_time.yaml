@@ -7,19 +7,19 @@ on:
     branches:
       - diagnostics/offline-integrate-v2-20261107
     paths:
-      - ".github/trigger_offline_integrate_v2_20261107.txt"
+      - ".github/trigger_offline_integrate_v2_retry_20261107.txt"
 
 permissions:
   contents: read
 
 jobs:
   check:
-    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run reviewed offline V2 rollout integration once'
+    if: github.run_attempt == 1 && github.event.head_commit.message == 'Run reviewed corrected offline V2 rollout integration once'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       EXPECTED_MAIN_SHA: f0da8ce7b3351f48115fdeb8394fcfb2e88c1341
-      EXPECTED_PR3_SHA: 432ff5bb2f5aee9144637641cc28d1c7b535fbfb
+      EXPECTED_PR3_SHA: 7af78705f4833c3106221b988abed7c18759fdf6
       METACULUS_TOKEN: ""
       METACULUS_TOKEN_V2: ""
       OPENAI_API_KEY: ""
