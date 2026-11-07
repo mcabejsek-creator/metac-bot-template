@@ -14,6 +14,7 @@ WORKFLOWS = [
     "test_bot.yaml",
     "initialize_publication_state.yaml",
     "review_bot.yaml",
+    "metaculus_history_audit.yaml",
 ]
 NEW_BINDING = "METACULUS_TOKEN: " + "$" + "{{ secrets.METACULUS_TOKEN_V2 }}"
 OLD_BINDING = "METACULUS_TOKEN: " + "$" + "{{ secrets.METACULUS_TOKEN }}"
@@ -28,6 +29,14 @@ class TokenIsolationRegression(unittest.TestCase):
                 self.assertEqual(data.count(NEW_BINDING), 1)
                 self.assertNotIn(OLD_BINDING, data)
                 self.assertNotIn("secrets.METACULUS_TOKEN ||", data)
+
+    def test_no_workflow_uses_revoked_secret(self):
+        for path in EXPECTED_DIR.glob("*.yaml"):
+            with self.subTest(workflow=path.name):
+                data = path.read_text(encoding="utf-8")
+                self.assertNotIn(OLD_BINDING, data)
+                if 'METACULUS_TOKEN:' in data:
+                    self.assertIn(NEW_BINDING, data)
 
     def test_publication_flows_stay_manual(self):
         for name in WORKFLOWS[:4]:
