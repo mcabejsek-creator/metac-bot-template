@@ -15,10 +15,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: 3fc87c038521da4ba4232973478d58ae512140ae
+          ref: 0df35a2f4deddc321f4178ca32a89445579a3e45
       - name: Confirm immutable audited script revision
         run: |
-          test "$(git rev-parse HEAD)" = "3fc87c038521da4ba4232973478d58ae512140ae"
+          test "$(git rev-parse HEAD)" = "0df35a2f4deddc321f4178ca32a89445579a3e45"
       - name: Python 3.11
         uses: actions/setup-python@v5
         with:
