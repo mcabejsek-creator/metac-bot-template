@@ -1,12 +1,27 @@
 # Vrchcab: bounded tournament pagination – offline review, 2026-11-07
 
-**Status:** draft PR #7, NOT merged. No live forecast/POST, no external LLM, no extra Metaculus GET. Main, the V2 secret and `metaculus-publication-state/publication.enc` are unchanged.
+**Status:** draft PR #7, NOT merged. No live forecast/POST or external LLM. Main, the V2 secret and `metaculus-publication-state/publication.enc` are unchanged. One separately authorized, exactly-six-GET metadata-only verification ran successfully on 2026-11-07; there were no additional live Metaculus requests during these follow-up offline changes.
 
 ## Confirmed root cause
 - Locked `forecasting-tools==0.2.92`; in the SDK `get_all_open_questions_from_tournament()` calls `get_questions_matching_filter(ApiFilter(...statuses=['open'], group_question_mode='unpack_subquestions'))` without `num_questions`. Thus `_filter_sequential_strategy(..., None)` retrieves only offset 0.
 - The SDK's alternative numbered strategy can also stop when a page contains no *parsed questions*, including a notebook-only page.
 - **Server implementation:** `posts/views.py` uses `CountlessLimitOffsetPagination`, and `utils/paginator.py` overrides `get_count` to infinity. Thus a non-null `next` is NOT proof of more records. Public independent measurement confirms `next` continues past exhausted query results.
 - `posts/views.py` passes `with_cp` and `include_user_forecasts=True` to `serialize_post_many`; `posts/serializers.py` prefetches own forecasts when authenticated and `with_cp=True`. But account/tier-specific responses may differ. If own forecast history is absent, **fail closed**; never infer `already_forecasted=False` from missing metadata.
+
+## Approved authenticated read-only verification, 2026-11-07
+
+- Explicit user authorization: one diagnostic, **maximum six authenticated GETs total** (3 offsets 0/100/200 per project), no POST, forecasts, LLM calls, merges or automated publication.
+- The isolated GitHub Actions run [42393040906](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42393040906) completed **successfully with exactly six GET attempts**. Its temporary workflow and script were subsequently removed from the isolated ops branch. No automatic recurrence remains.
+- FutureEval: offset 0 returned two raw posts (one notebook and one open question); offset 100 returned zero, offset 200 zero. The open question had `my_forecasts.history=[]` for the authenticated token account; **this does not establish actual close time, publishing eligibility, full account history or forecast safety**.
+- MiniBench: offsets 0/100/200 all returned zero raw posts.
+- **All six responses had `next` non-null**, even on empty pages; this confirms the phantom-next behavior against the authenticated server.
+- In an offline replay of these aggregate observations, the bounded scanner requires only **three** FutureEval pages and **two** MiniBench pages before finding two consecutive raw empty pages. No real question IDs, titles, tokens, forecast values or full response bodies were retained in this test fixture.
+- The separate observation alone does **not** confirm that the open FutureEval question is currently forecastable, or that future snapshots won't differ.
+
+## Additional conditional-history safety finding
+
+- In the pinned SDK, `ConditionalQuestion.from_metaculus_api_json` computes `my_forecasts` as `question_yes.my_forecasts or question_no.my_forecasts`. A present dictionary with `history=[]` is truthy even when the opposite branch has a previous forecast. The composite question can therefore be falsely marked unforecasted.
+- The selector now rejects a conditional post if only one of its yes/no branches has a nonempty prior history; it refuses partial inventory rather than risking duplicate publication. This is deliberately conservative. An offline regression exercises the mismatch. It must not be relaxed without full reconciled semantics for both branches.
 
 ## Bounded scanner
 - Only projects `33121`, `minibench`, only GET `/api/posts/`, `statuses=open`, `limit=100`, `order_by=-published_time`, `with_cp=true`, `include_conditional_cps=true`; no type filter (retain group posts).
