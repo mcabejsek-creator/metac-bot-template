@@ -1,0 +1,1 @@
+EXPLICIT USER AUTHORIZATION 2026-11-07: launch exactly ONE supervised live forecast run for FutureEval project 33121 and current MiniBench; may use paid Perplexity/OpenRouter credits and publish forecasts/comments. Prohibit Cup, Test Bot, historical reruns, automatic cron. Pinned prod main f77f2329e9c09e787333416300ae35fa02f240a0, V2 token, protected encrypted journal.
