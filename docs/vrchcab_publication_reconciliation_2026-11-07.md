@@ -85,3 +85,20 @@ Na oddělené diagnostické větvi byla po čistě lokálním merge ve **virtuá
 - Production `main`, stavové úložiště `metaculus-publication-state`, první ostrý publish a cron-job.org nebyly změněny.
 
 **Význam:** Technická kompatibilita balíku oprav a rotace přístupových údajů je podložena offline testy. **Nejde** o samostatný důkaz, že všechny staré pokusy byly rekonciliovány. Potřebujeme separátní výslovné schválení před produkčním merge, journal init a jakýmkoli živým odesláním předpovědí.
+
+## Opakované publikace v testovacím režimu (ověřeno z historických logů)
+
+Nezávislá a **bez-API** kontrola pěti dostupných GitHub Actions logů režimu `Test Bot` potvrdila, že se testovací předpovědi na stejné otázky opakovaly. Skript v analýze porovnal interně ID otázek uvedená v potvrzovacích logových hláškách, ale **žádná ID ani hodnoty prognóz nebyly vypsány do této zprávy**.
+
+| Run | Datum UTC | Počet potvrzených POST |
+|---|---|---:|
+| [34461778866](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/34461778866) | 2026-09-10 | 10 |
+| [39569483713](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/39569483713) | 2026-10-21 | 11 |
+| [39570865331](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/39570865331) | 2026-10-21 | 11 |
+| [39572843071](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/39572843071) | 2026-10-21 | 11 |
+| [41676843011](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/41676843011) | 2026-11-03 | 10 |
+
+Celkem **53 potvrzených událostí na 12 různých otázek**, z nichž **11 mělo opakované publikace** v těchto pěti vzorkovaných bězích. Maximálně 5 záznamů na jednu otázku v tomto vzorku. Toto není plný inventář testovacího projektu.
+
+Výsledek je konzistentní s tím, že režim `test_questions` záměrně nastavuje `skip_previously_forecasted_questions=False` a publikuje. **Neprokazuje** nežádoucí duplicity v soutěžích FutureEval nebo MiniBench; u těch API vrátilo jednu historickou předpověď na každou z 171 otázek s historií. Je však nezbytné testovací režim zahrnout do návrhu izolace publikačních cest a rekonstrukce celkové historie.
+
