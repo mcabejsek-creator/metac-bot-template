@@ -1,1 +1,0 @@
-Authorized diagnostic for read-only V2-backed Metaculus open posts in Fall FutureEval and MiniBench. Two GETs maximum, zero forecast/comment/model writes.
