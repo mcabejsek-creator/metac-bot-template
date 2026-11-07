@@ -49,3 +49,27 @@ The 20:50 run overlapped the 21:01 run, which later reported one confirmed publi
 5. Obtain user's explicit consent before merge, journal initialization, any live forecast or scheduling.
 
 **Safety:** This document is evidence only. No production merge, initialization, scheduler restart or live write is authorized.
+
+## Potvrzený projektový inventář (2026-11-07, 12:34 UTC)
+
+Na výslovné schválení uživatele byl přes nový `METACULUS_TOKEN_V2` spuštěn samostatný jednorázový, čistě čtecí GET audit dvou soutěží. [Úspěšný běh 42373102862](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42373102862). V CI prošlo všech šest syntetických offline testů, po nich následovaly přesně dva skutečné GET požadavky, žádné POST ani volání LLM. Jednorázový spouštěč byl po použití odstraněn.
+
+| Projekt | Otázky vrácené API | Otázky s historií | Historické záznamy | Nejstarší záznam UTC | Nejnovější záznam UTC |
+|---|---:|---:|---:|---|---|
+| Fall FutureEval 2026 (33121) | 119 | 111 | 111 | 2026-09-28 14:21:25 | 2026-11-06 12:02:17 |
+| MiniBench (minibench) | 60 | 60 | 60 | 2026-11-02 00:47:01 | 2026-11-03 22:47:04 |
+| **Celkem** | **179** | **171** | **171** | | |
+
+API v každé z 171 otázek s předpovědí vrátilo právě jeden historický záznam. To je důležitý **důkaz absence opakovaných předpovědí na jednu otázku uvnitř těchto dvou projektů**, nikoliv absolutní garance neexistence jakýchkoliv duplicit mimo projekty ani potvrzení všech možných nejednoznačných pokusů. Osm otázek vrácených z FutureEval nemá v API historii tohoto bota; nelze z toho usuzovat, zda zůstaly kdykoliv předpověditelné či měly soutěžní okno.
+
+**Reconciliation flag zůstal FALSE.** Rozsah čtení je omezen na dva projekty, data viditelná účtu Vrchcab a současný stav API. Projektově zaměřené GET nevylučují nejasné starší publikace v dalších turnajích/testovacích režimech. Opačně, historické potvrzené příspěvky v GitHub logách jsou s tímto inventářem slučitelné, ale jejich přesné mapování na otázky nebylo provedeno (záměrně se neukládala ID).
+
+### Další bezpečné kroky
+
+1. Dokončit statickou kontrolu všech starých publikačních vstupů a nové rotace tokenu. Starý běh 34463156990 zůstal ve frontě, ale API před rotací přijímalo jeho token a po rotaci odmítá starý token HTTP 403; screenshot Metaculus potvrdil regeneraci s deklarovaným zneplatněním starého klíče.
+2. Na oddělené větvi otestovat integraci PR #1 a PR #3 včetně všech offline regresí; **bez merge do main**.
+3. Ujasnit rozsah historické rekonciliace (zahrnuje i testování a Metaculus Cup); neočekávat, že pouze dva projekty tvoří veškerou historii.
+4. Nezadávat inicializační potvrzení `all-prior-runs-reconciled`, dokud skutečně nemáme důkaz vyřešení všech nejistých publikací.
+5. Teprve s novým explicitním souhlasem provést merge, inicializaci žurnálu, jeden kontrolovaný produkční běh a pozdější obnovení cron-job.org.
+
+Žádné nové publikování zde nebylo povoleno.
