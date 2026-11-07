@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: "Stop old writers and reconcile all previous uncertain writes before initializing."
+        description: "Old writers frozen, old attempts never rerun; historic outcomes remain unknown."
         type: choice
         required: true
         default: not-confirmed
         options:
           - not-confirmed
-          - all-prior-runs-reconciled
+          - legacy-frozen-no-retries
 
 permissions:
   contents: write
@@ -49,8 +49,8 @@ jobs:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
           PRIOR_RUNS_ACK: ${{ inputs.confirmation }}
         run: |
-          if [ "$PRIOR_RUNS_ACK" != "all-prior-runs-reconciled" ]; then
-            echo "Prior runs must be reconciled before initializing a fresh journal." >&2
+          if [ "$PRIOR_RUNS_ACK" != "legacy-frozen-no-retries" ]; then
+            echo "Explicit legacy freeze/no-retries acknowledgement required; journal not initialized." >&2
             exit 1
           fi
-          poetry run python -B -m github_publication --initialize --confirm-prior-runs-reconciled
+          poetry run python -B -m github_publication --initialize --confirm-legacy-frozen-no-retries
