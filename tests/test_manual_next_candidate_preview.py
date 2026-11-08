@@ -132,6 +132,10 @@ class OperatorNextCandidateTests(OfflineTestCase):
         wf = (ROOT / ".github/workflows/readonly_inventory_preflight_manual.yaml").read_text()
         self.assertIn("YES_FIND_ONE_PUBLIC_POST_ID", wf)
         self.assertIn("YES_READ_ONLY_MAX_TEN_GETS", wf)
+        # Regression: prior workflow always forwarded the counts-only choice,
+        # even when the operator explicitly selected the public candidate.
+        self.assertIn("VRCHCAB_READONLY_PREFLIGHT_APPROVED: ${{ inputs.confirmation }}", wf)
+        self.assertNotIn('VRCHCAB_READONLY_PREFLIGHT_APPROVED: "YES_READ_ONLY_MAX_TEN_GETS"', wf)
         self.assertIn("default: \"DO_NOT_RUN\"", wf)
         self.assertIn("workflow_dispatch:", wf)
         self.assertNotIn("\n  schedule:", wf)
