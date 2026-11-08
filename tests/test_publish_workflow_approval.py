@@ -35,6 +35,17 @@ class LivePublishingApprovalGuards(unittest.TestCase):
                 )
                 self.assertIn("  contents: write", source)  # needed ONLY if approved
 
+    def test_perplexity_recharge_confirmation_choice_remains_string(self):
+        # YAML 1.1 can coerce unquoted YES/NO into booleans and render
+        # them as true/false in GitHub's manual dispatch form. The
+        # publishing gate must compare against the exact visible "YES".
+        source = (ROOT / ".github" / "workflows" / PUBLISHERS[0]).read_text()
+        self.assertIn('      perplexity_auto_recharge_off:', source)
+        self.assertIn('        default: "NO"\n', source)
+        self.assertIn('          - "NO"\n', source)
+        self.assertIn('          - "YES"\n', source)
+        self.assertIn("inputs.perplexity_auto_recharge_off == 'YES'", source)
+
     def test_stale_external_cron_payload_cannot_authorize_publishing(self):
         # Historic cron-job.org dispatched workflow_dispatch to the tournament
         # workflow with no explicit publication_approval input. The new default
