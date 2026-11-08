@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
+import worker_configuration
 import dotenv
 
 # Runtime helpers (env validation, banners, dependency-warning suppression).
@@ -244,7 +245,7 @@ This question's outcome will be determined by the specific criteria below:
                 research = await researcher.invoke(prompt)
 
             elif researcher == "perplexity-agent":
-                research = await agent_research(self, prompt, phase="initial")
+                research = await agent_research(self, prompt, phase=worker_configuration.WORKER_CONFIG.agent_phases[0])
 
                 fact_check_prompt = self._clean_prompt(
                     f"""
@@ -278,7 +279,7 @@ This question's outcome will be determined by the specific criteria below:
                     """, question=question, values=(packet, research)
                 )
 
-                research = await agent_research(self, fact_check_prompt, phase="fact-check")
+                research = await agent_research(self, fact_check_prompt, phase=worker_configuration.WORKER_CONFIG.agent_phases[1])
 
             elif not researcher or researcher == "None" or researcher == "no_research":
                 logger.info("Research intentionally disabled for URL %s", question.page_url)
@@ -1030,8 +1031,8 @@ if __name__ == "__main__":
     # whichever default models forecasting-tools picks based on your env vars;
     # uncomment and edit to pin specific models.
     template_bot = SummerTemplateBot2026(
-        research_reports_per_question=2,
-predictions_per_research_report=3,
+        research_reports_per_question=worker_configuration.WORKER_CONFIG.research_reports_per_question,
+predictions_per_research_report=worker_configuration.WORKER_CONFIG.predictions_per_research_report,
         use_research_summary_to_forecast=False,
         publish_reports_to_metaculus=publish_to_metaculus,
         folder_to_save_reports_to=None,
@@ -1045,7 +1046,7 @@ predictions_per_research_report=3,
         allowed_tries=2,
     ),
     "summarizer": "openrouter/openai/gpt-4o-mini",
-    "researcher": "perplexity-agent",
+    "researcher": worker_configuration.WORKER_CONFIG.researcher,
     "parser": "openrouter/openai/gpt-4o-mini",
 },
 )
