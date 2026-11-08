@@ -1,14 +1,12 @@
 # Strictly read-only inventory. NOT on a cron. NOT part of publisher.
-# The default-branch manual-dispatch path is inert while this remains a draft PR.
-# Before merge, an isolated-branch PUSH path can run only after an additional
-# user-approved single commit with the exact one-shot authorization marker.
-# Ordinary PR commits create skipped jobs, not authenticated GET requests.
+# The single approved branch-only push trigger ran successfully ONCE
+# (GitHub Actions run 42455748234, 2026-11-08), and has been removed.
+# This workflow is now manual-dispatch ONLY. While confined to a draft PR,
+# it cannot be dispatched via GitHub's default-branch workflow catalog.
+# A fresh explicit user authorization is required before any further real GET.
 name: Vrchcab manual inventory preflight (strictly GET only)
 
 on:
-  push:
-    branches:
-      - "fix/bounded-futureeval-pagination-20261107"
   workflow_dispatch:
     inputs:
       confirmation:
@@ -30,7 +28,7 @@ concurrency:
 jobs:
   offline_safety:
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1) || (github.event_name == 'push' && github.ref == 'refs/heads/fix/bounded-futureeval-pagination-20261107' && github.event.head_commit.message == 'AUTHORIZE_ONCE_READONLY_INVENTORY_20261108' && github.run_attempt == 1)
+      github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -59,7 +57,7 @@ jobs:
 
   manual_get_only:
     if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1) || (github.event_name == 'push' && github.ref == 'refs/heads/fix/bounded-futureeval-pagination-20261107' && github.event.head_commit.message == 'AUTHORIZE_ONCE_READONLY_INVENTORY_20261108' && github.run_attempt == 1)
+      github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1
     needs: offline_safety
     runs-on: ubuntu-latest
     timeout-minutes: 8
