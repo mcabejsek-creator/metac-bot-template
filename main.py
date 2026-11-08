@@ -45,6 +45,9 @@ from runtime_limits import RuntimeLimitsMixin, cancellable_cli
 from research_safety import agent_research, validate_research_text
 from forecast_validation import ForecastValidationMixin, structure_output
 from question_context import TARGET_PERIOD_NOTE, QuestionContextMixin, effective_close, measurement_context, utc_date
+from bounded_open_question_selection import (
+    BoundedPostReader, deduplicate_tournaments, scan_open_tournament,
+)
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
@@ -830,13 +833,74 @@ For differences, margins, spreads, or leads between two percentages or proportio
         )
 
 
-async def forecast_for_mode(template_bot, run_mode):
+def select_first_live_binary_question(seasonal, minibench, question_id):
+    """Select exactly one explicitly named, never-forecasted binary question.
+
+    This is an opt-in FIRST-LIVE safety restriction, not eligibility approval.
+    It does not make stale Metaculus history/status authoritative at POST time.
+    """
+    if type(question_id) is not int or question_id <= 0:
+        raise RuntimeError("First-live question ID must be a positive integer")
+    matches = [(label, q) for label, batch in (
+        ("seasonal", seasonal), ("minibench", minibench)
+    ) for q in batch if q.id_of_question == question_id]
+    if len(matches) != 1:
+        raise RuntimeError("First-live question ID not uniquely present in validated inventory")
+    label, question = matches[0]
+    if not isinstance(question, BinaryQuestion) or question.question_type != "binary":
+        raise RuntimeError("First-live mode supports exactly one binary question, not groups/conditionals")
+    if question.already_forecasted is not False:
+        raise RuntimeError("First-live mode refuses any previously forecasted question")
+    if question.id_of_question != question_id:
+        raise RuntimeError("First-live ID changed")
+    return ([question], []) if label == "seasonal" else ([], [question])
+
+
+async def forecast_for_mode(template_bot, run_mode, *, first_live_binary_id=None):
     """One run budget and event loop, including retrieval and both tournaments."""
+    if first_live_binary_id is not None and run_mode != "tournament":
+        raise RuntimeError("First-live binary restriction applies only to tournament mode")
     async with template_bot.run_budget():
         client = MetaculusClient()
         if run_mode == "tournament":
-            seasonal = await template_bot.forecast_on_tournament(33121, return_exceptions=True)
-            minibench = await template_bot.forecast_on_tournament(client.CURRENT_MINIBENCH_ID, return_exceptions=True)
+            if template_bot.skip_previously_forecasted_questions is not True:
+                raise RuntimeError("Tournament mode requires skip-previously-forecasted")
+            # Complete BOTH bounded inventories before any forecast or paid model call.
+            # If any page is ambiguous, fail closed and publish nothing.
+            reader = BoundedPostReader(template_bot.metaculus_client)
+            seasonal_questions = scan_open_tournament(
+                template_bot.metaculus_client, 33121, read_page=reader,
+            )
+            minibench_questions = scan_open_tournament(
+                template_bot.metaculus_client, client.CURRENT_MINIBENCH_ID,
+                read_page=reader,
+            )
+            seasonal_questions, minibench_questions = deduplicate_tournaments(
+                seasonal_questions, minibench_questions,
+            )
+            if first_live_binary_id is not None:
+                # Never select before BOTH inventories have safely completed.
+                # A missing, ineligible or already forecasted ID fails closed.
+                seasonal_questions, minibench_questions = select_first_live_binary_question(
+                    seasonal_questions, minibench_questions, first_live_binary_id,
+                )
+            # Empty authenticated inventories are a safe no-op: do not even
+            # initialize the remote publication journal or request model work.
+            # Keep the two-phase read-only scan above mandatory in all cases.
+            if not seasonal_questions and not minibench_questions:
+                return []
+            seasonal = (
+                await template_bot.forecast_questions(
+                    seasonal_questions, return_exceptions=True,
+                )
+                if seasonal_questions else []
+            )
+            minibench = (
+                await template_bot.forecast_questions(
+                    minibench_questions, return_exceptions=True,
+                )
+                if minibench_questions else []
+            )
             return seasonal + minibench
         if run_mode == "metaculus_cup":
             template_bot.skip_previously_forecasted_questions = False
@@ -861,8 +925,16 @@ if __name__ == "__main__":
         default="tournament",
         help="What to forecast on (default: tournament)",
     )
+    parser.add_argument(
+        "--first-live-binary-id",
+        type=int,
+        default=None,
+        help="Optional FIRST LIVE guard: publish at most one matching unforecasted binary question",
+    )
     args = parser.parse_args()
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
+    if args.first_live_binary_id is not None and (args.first_live_binary_id <= 0 or run_mode != "tournament"):
+        parser.error("--first-live-binary-id requires a positive ID and --mode tournament")
 
     check_environment(strict=True)
     publish_to_metaculus = True
@@ -901,7 +973,9 @@ predictions_per_research_report=3,
         "test_questions": "https://www.metaculus.com/tournament/bot-testing-area/",
     }
 
-    forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(template_bot, run_mode)))
+    forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(
+        template_bot, run_mode, first_live_binary_id=args.first_live_binary_id,
+    )))
 
     template_bot.log_report_summary(forecast_reports)
     print_run_summary_banner(

@@ -14,6 +14,11 @@ on:
         options:
           - DO_NOT_RUN
           - APPROVE_ONE_LIVE_PUBLICATION_RUN
+      first_live_binary_id:
+        description: "Explicit one-question BINARY ID only; do not use until separately approved"
+        type: string
+        required: true
+        default: DO_NOT_RUN
   
 
 
@@ -37,6 +42,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN' &&
+      inputs.first_live_binary_id != 'DO_NOT_RUN' &&
+      inputs.first_live_binary_id != '' &&
       github.run_attempt == 1
     timeout-minutes: 210 # Setup/tests + 180-minute supervised bot + shutdown margin.
     runs-on: ubuntu-latest # determines the machine that will run the job - keep as is
@@ -68,10 +75,11 @@ jobs:
         run: poetry run python -B -m tests.run
       - name: Run bot
         run: |
-          .venv/bin/python -B -m bounded_run -- .venv/bin/python -B main.py
+          .venv/bin/python -B -m bounded_run -- .venv/bin/python -B main.py --mode tournament --first-live-binary-id "$FIRST_LIVE_BINARY_ID"
         # this reads the environment variables from the github repository.
         # Store under Settings --> Secrets and variables --> Actions
         env:
+          FIRST_LIVE_BINARY_ID: ${{ inputs.first_live_binary_id }}
           GITHUB_TOKEN: ${{ github.token }}
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }} # replace this with the name of the variable under which you stored your own Metaculus token
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}

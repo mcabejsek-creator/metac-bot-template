@@ -27,9 +27,9 @@ class ActionsConfigurationTests(OfflineTestCase):
                 self.assertNotIn("github.ref", workflow["concurrency"]["group"])
                 self.assertNotIn("github.run", workflow["concurrency"]["group"])
 
-    def test_original_forecast_triggers_and_commands_are_preserved(self):
+    def test_forecast_triggers_and_explicit_live_commands_are_preserved(self):
         expected = {
-            "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py"),
+            "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, '.venv/bin/python -B main.py --mode tournament --first-live-binary-id "$FIRST_LIVE_BINARY_ID"'),
             "test_bot.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py --mode test_questions"),
             "run_bot_on_metaculus_cup.yaml": ({"workflow_dispatch"}, ".venv/bin/python -B main.py --mode metaculus_cup"),
         }
@@ -43,6 +43,15 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
             self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
             self.assertNotIn("${{ secrets.METACULUS_TOKEN }}", step["env"].values())
+            if name == "run_bot_on_tournament.yaml":
+                self.assertEqual(step["env"]["FIRST_LIVE_BINARY_ID"],
+                                 "${{ inputs.first_live_binary_id }}")
+                job_gate = workflow["jobs"]["forecast_job"]["if"]
+                self.assertIn("inputs.first_live_binary_id != 'DO_NOT_RUN'", job_gate)
+                self.assertIn("inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN'", job_gate)
+                self.assertIn("github.run_attempt == 1", job_gate)
+            else:
+                self.assertNotIn("FIRST_LIVE_BINARY_ID", step["env"])
         self.assertNotIn("schedule", self.workflows["run_bot_on_metaculus_cup.yaml"]["on"])
 
     def test_real_supervisor_cli_accepts_python_flags_without_poetry_parser(self):

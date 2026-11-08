@@ -450,7 +450,13 @@ class PlanValidationTests(ValidationCase):
 
 class FullNumericPipelineTests(ValidationCase):
     async def pipeline(self, kind):
-        q = DataOrganizer.get_question_from_post_json(api_post(kind))
+        # The initial shape-only SDK fixtures intentionally omit scheduling.
+        # A real publishing integration needs explicit open/close metadata;
+        # supply it here rather than disabling the pre-POST deadline guard.
+        post = api_post(kind)
+        post["question"]["open_time"] = "2026-11-01T00:00:00Z"
+        post["question"]["scheduled_close_time"] = "2026-11-10T00:00:00Z"
+        q = DataOrganizer.get_question_from_post_json(post)
         values = [{"percentile": p, "value": q.lower_bound + (q.upper_bound - q.lower_bound) * p}
                   for p in (.1, .2, .4, .6, .8, .9)] if kind != "date" else [
                       {"percentile": p, "value": date} for p, date in zip((.1, .2, .4, .6, .8, .9),

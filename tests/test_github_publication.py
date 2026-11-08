@@ -336,6 +336,79 @@ class RemoteJournalTests(GitHubTestCase):
 
 
 class RemotePipelineTests(GitHubTestCase):
+    async def test_complete_forecast_encrypted_checkpoint_then_fresh_runner_restore(self):
+        """Model -> fake Metaculus -> encrypted fake GitHub ACK -> cold restore.
+
+        There are no real credentials, HTTP requests or model invocations.
+        The second runner shares ONLY the fake remote GitHub and Metaculus,
+        never the first runner's memory or local publication database.
+        """
+        model_calls = self.model()
+        sink = LocalMetaculus()
+        q = question("japanese_diet")
+        first = self.bot(publish_reports_to_metaculus=True, metaculus_client=sink)
+        first.publication_store = self.runner()
+        report = await first.forecast_question(q)
+        key = first._publication_key(q)
+        self.assertEqual([step["state"] for step in self.runner().steps(key)],
+                         ["confirmed", "confirmed"])
+        self.assertEqual((len(sink.forecasts), len(sink.comments)), (1, 1))
+        self.assertGreater(len(model_calls), 0)
+        model_count = len(model_calls)
+
+        # The actual (synthetic) report must be encrypted at rest in every
+        # fake remote GitHub file, including per-question shards.
+        for encrypted in self.server.files.values():
+            self.assertNotIn(report.explanation.encode(), encrypted)
+            self.assertNotIn(METACULUS_KEY.encode(), encrypted)
+
+        second = self.bot(publish_reports_to_metaculus=True, metaculus_client=sink)
+        second.publication_store = self.runner()
+        self.assertIsNot(first.publication_store, second.publication_store)
+        self.assertFalse(hasattr(second.publication_store, "path"))
+        recovered = await second.forecast_question(q)
+        self.assertEqual(recovered.model_dump(), report.model_dump())
+        self.assertEqual(len(model_calls), model_count,
+                         "Confirmed plan must not trigger another paid-model simulation")
+        self.assertEqual((len(sink.forecasts), len(sink.comments)), (1, 1),
+                         "Confirmed forecast and comment must never be re-POSTed")
+        self.assertEqual([step["state"] for step in self.runner().steps(key)],
+                         ["confirmed", "confirmed"])
+
+    async def test_lost_github_confirm_ack_after_forecast_acceptance_recovers_comment_only(self):
+        """GitHub persisted the confirmed forecast but its ACK was lost.
+
+        An independent runner must detect that checkpoint and finish ONLY the
+        remaining comment, with zero duplicate forecasts or model work.
+        """
+        model_calls = self.model()
+        class AcceptedForecastLostGitHubAck(LocalMetaculus):
+            def post_binary_question_prediction(inner, question_id, prediction):
+                super().post_binary_question_prediction(question_id, prediction)
+                self.server.lose_ack = "after"  # Next GitHub confirmation PUT
+
+        sink = AcceptedForecastLostGitHubAck()
+        q = question("japanese_diet")
+        first = self.bot(publish_reports_to_metaculus=True, metaculus_client=sink)
+        first.publication_store = self.runner()
+        result = await first.forecast_questions([q], return_exceptions=True)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], Exception)
+        key = first._publication_key(q)
+        self.assertEqual([step["state"] for step in self.runner().steps(key)],
+                         ["confirmed", "ready"])
+        self.assertEqual((len(sink.forecasts), len(sink.comments)), (1, 0))
+        count = len(model_calls)
+
+        second = self.bot(publish_reports_to_metaculus=True, metaculus_client=sink)
+        second.publication_store = self.runner()
+        restored = await second.forecast_question(q)
+        self.assertIsNotNone(restored)
+        self.assertEqual((len(sink.forecasts), len(sink.comments)), (1, 1))
+        self.assertEqual(len(model_calls), count)
+        self.assertEqual([step["state"] for step in self.runner().steps(key)],
+                         ["confirmed", "confirmed"])
+
     async def test_tournament_only_recovers_comment_from_previous_cup_intent(self):
         """Release gate: skip=True must remain true across intent recovery.
 
