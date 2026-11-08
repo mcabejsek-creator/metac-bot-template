@@ -49,6 +49,13 @@
 - **The one-shot branch-push authorization was consumed and then explicitly disarmed** by removing the `push` trigger. Remaining workflow is `workflow_dispatch`-only, with `DO_NOT_RUN` as default and GitHub `run_attempt == 1` gate; while present only in the draft PR, it is not available for direct manual dispatch from the default branch. Further authenticated GET scans require renewed explicit user permission.
 - No change to production `main` or encrypted publication state was authorized. The original live POST/checkpoint and paid model path remain entirely unverified.
 
+## Empty-inventory no-op safety (2026-11-08)
+
+- The approved five-GET live preflight returned **zero** validated open questions in both competitions. This uncovered an avoidable side effect in the proposed tournament path: calling `forecast_questions([])` would enter `SafePublicationMixin.forecast_questions` and initialize/preflight the remote publication backend, despite no question being available.
+- Updated `main.forecast_for_mode` to **return `[]` before any `forecast_questions` call** whenever both fully scanned inventories are empty. When only one competition has questions, it skips calling `forecast_questions` for the empty one; this avoids unnecessary publication-journal reads and preflight operations. Both bounded GET scans are always completed first, and failure still aborts before any publisher/model call.
+- Added offline tests which explicitly configure `publish_reports_to_metaculus=True` while injecting a publication-runtime failure if ever touched, verifying that a zero-candidate inventory produces **zero publisher/journal/model calls**. Another test checks exactly one nonempty competition is dispatched.
+- This is a **local proposed-code property**, not proof of live publishing/remote checkpoint correctness; review gates remain in force.
+
 ## Remaining risks / REVIEW GATES
 1. Two empty pages is a defensive terminal heuristic grounded in the server's contiguous offset pagination, **not a mathematical proof** of absence under concurrent feed mutation. Track potential offset drift and consider a bounded repeat/consistency check if live observations demand it.
 2. Check the **actual authenticated Vrchcab list JSON schema** in an approved minimal read-only verification. Do not print private forecast values, question IDs/titles, credentials, or raw response bodies.
