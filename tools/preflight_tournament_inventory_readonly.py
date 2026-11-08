@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from forecasting_tools import BinaryQuestion
+
 # Running as a script from tools/ must still import the repository root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -58,14 +60,44 @@ def _summary(questions, now):
     }
 
 
-def inspect(client, read_page, *, now=None):
+def _candidate_check(first, second, candidate_id):
+    """Confirm an operator-supplied ID without disclosing the ID or forecast history.
+
+    This is an optional snapshot-only check. It must not be mistaken for
+    tournament eligibility, a full historic reconciliation, or live POST approval.
+    """
+    if type(candidate_id) is not int or candidate_id <= 0:
+        raise IncompleteQuestionScan("Invalid operator-supplied candidate ID")
+    matches = [q for q in (*first, *second) if q.id_of_question == candidate_id]
+    matched = len(matches) == 1
+    q = matches[0] if matched else None
+    eligible_binary = (
+        matched
+        and isinstance(q, BinaryQuestion)
+        and q.question_type == "binary"
+        and q.already_forecasted is False
+    )
+    return {
+        "present_once_in_validated_open_inventory": matched,
+        "binary_with_empty_token_forecast_history_in_snapshot": bool(eligible_binary),
+        "historical_outcomes_fully_reconciled": False,
+        "competition_participation_verified": False,
+        "publish_time_status_verified": False,
+        "live_publication_authorized": False,
+        "operator_supplied_question_id_not_logged": True,
+    }
+
+
+def inspect(client, read_page, *, now=None, candidate_id=None):
     """Run full bounded scans before reporting any partial results."""
+    if candidate_id is not None and (type(candidate_id) is not int or candidate_id <= 0):
+        raise IncompleteQuestionScan("Invalid operator-supplied candidate ID")
     timestamp = utc_date(now or datetime.now(timezone.utc))
     budget = RequestBudget(read_page)
     first = scan_open_tournament(client, FUTUREEVAL, read_page=budget, now=timestamp)
     second = scan_open_tournament(client, MINIBENCH, read_page=budget, now=timestamp)
     first, second = deduplicate_tournaments(first, second)
-    return {
+    report = {
         "mode": "strictly_read_only_manual_preflight",
         "snapshot_utc": timestamp.isoformat(),
         "completed_both_inventories": True,
@@ -88,6 +120,9 @@ def inspect(client, read_page, *, now=None):
             "No actual model/publication/checkpoint end-to-end validation is performed."
         ),
     }
+    if candidate_id is not None:
+        report["operator_selected_candidate"] = _candidate_check(first, second, candidate_id)
+    return report
 
 
 def self_check():
@@ -147,6 +182,20 @@ def self_check():
     assert "synthetic" not in serialized and '"111"' not in serialized
     assert '"112"' not in serialized and '"113"' not in serialized
     assert report["tournament_participation_eligibility_verified"] is False
+    # The opt-in candidate check never exposes the user-supplied ID.
+    with_candidate = inspect(FakeClient(), reader, now=now, candidate_id=111)
+    check = with_candidate["operator_selected_candidate"]
+    assert check["present_once_in_validated_open_inventory"] is True
+    assert check["binary_with_empty_token_forecast_history_in_snapshot"] is False
+    assert check["live_publication_authorized"] is False
+    assert "111" not in json.dumps(with_candidate)
+    assert with_candidate["authenticated_get_attempts"] == 6
+    try:
+        inspect(FakeClient(), reader, now=now, candidate_id=-1)
+    except IncompleteQuestionScan:
+        pass
+    else:
+        raise AssertionError("Invalid candidate ID did not fail closed")
 
     # A failure while scanning the SECOND competition must not emit a partial
     # successful inventory, and no extra network attempt may be retried.
@@ -200,11 +249,19 @@ def main():
         print("Preflight stopped: missing or malformed credential", file=sys.stderr)
         sys.exit(2)
     try:
+        # Optional operator input, never emitted to logs. It does not authorize
+        # an API request; the existing explicit GET approval is still mandatory.
+        raw_candidate = os.getenv("VRCHCAB_CANDIDATE_QUESTION_ID", "").strip()
+        candidate_id = None
+        if raw_candidate:
+            if not raw_candidate.isascii() or not raw_candidate.isdecimal() or int(raw_candidate) <= 0:
+                raise IncompleteQuestionScan("Invalid candidate input")
+            candidate_id = int(raw_candidate)
         from forecasting_tools import MetaculusClient
         client = MetaculusClient(token=token.strip().removeprefix("Token ").strip())
         reader = BoundedPostReader(client)
         print("Starting approved GET-only, at-most-ten-request manual preflight", flush=True)
-        report = inspect(client, reader)
+        report = inspect(client, reader, candidate_id=candidate_id)
         print(json.dumps(report, sort_keys=True), flush=True)
     except Exception:
         # Never log raw API payloads, question titles, URLs, tokens or private history.
