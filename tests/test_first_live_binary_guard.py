@@ -222,6 +222,13 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         self.assertIn("PERPLEXITY_VERIFIED_AT_UTC:", source)
         self.assertIn("PERPLEXITY_MAX_AUTO_RUN_USD:", source)
         self.assertIn("METACULUS_SPONSORED_KEY_SUFFIX:", source)
+        # PUBLIC repo: never pass wallet balance through visible Actions inputs.
+        self.assertIn("secrets.VRCHCAB_PERPLEXITY_VERIFIED_BALANCE_USD", source)
+        self.assertIn("secrets.VRCHCAB_PERPLEXITY_VERIFIED_AT_UTC", source)
+        self.assertIn("secrets.VRCHCAB_PERPLEXITY_MAX_ONE_RUN_USD", source)
+        self.assertNotIn("inputs.perplexity_verified_balance_usd", source)
+        self.assertNotIn("inputs.perplexity_verified_at_utc", source)
+        self.assertNotIn("inputs.perplexity_run_cap_usd", source)
 
 
 if __name__ == "__main__":
