@@ -17,13 +17,14 @@ from pathlib import Path
 
 import requests
 from pydantic import BaseModel
-from forecasting_tools import MetaculusClient
+from forecasting_tools import ConditionalQuestion, MetaculusClient
 from forecasting_tools.data_models.data_organizer import DataOrganizer
 
 from publication_journal import (
     PublicationRejected, PublicationStore, PublicationUncertain, Publisher, canonical, digest,
 )
 from runtime_limits import check_blocking_cancelled
+from question_context import effective_close, utc_date, utc_now
 from forecast_validation import restore_typed_question, validate_operation, validate_plan
 
 
@@ -216,6 +217,28 @@ class SafePublicationMixin:
             return function(*args)
         return await runner(function, *args)
 
+    @staticmethod
+    def _require_forecast_window_open(question):
+        """Refuse NEW forecast POSTs after their known, snapshot-based close time.
+
+        Do not use this guard for comment-only recovery of an ALREADY confirmed
+        forecast: comments may need to be recovered after forecast closing.
+        This is not a fresh server-state GET and cannot detect a newly moved
+        deadline that is absent from the saved API question snapshot.
+        """
+        targets = (
+            (question.question_yes, question.question_no)
+            if isinstance(question, ConditionalQuestion) else (question,)
+        )
+        now = utc_date(utc_now())
+        for target in targets:
+            start = utc_date(target.open_time)
+            close = effective_close(target)
+            if start is None or close is None or not start <= now < close:
+                raise PublicationUncertain(
+                    "Question forecast window is no longer verifiably open; no new POST"
+                )
+
     async def _drain_publication(self, publisher, key, question):
         # One blocking action per await. Cancellation of a claim waiter can
         # NEVER continue into a POST in a detached worker. Cancellation during
@@ -237,6 +260,14 @@ class SafePublicationMixin:
             raise ValueError("Frozen publication operation hash changed; do not send")
         validate_plan(question, report, operations)
         for step in steps:
+            if step["state"] == "confirmed":
+                continue
+            # Recheck right before claiming/sending a NEW forecast. If a long
+            # model job outlived the question deadline, leave the frozen
+            # journal plan in ready/rejected state without ever attempting POST.
+            # A confirmed forecast's unfinished comment may still be recovered.
+            if json.loads(step["operation"]).get("kind") == "forecast":
+                self._require_forecast_window_open(question)
             if not await self._publication_call(store.claim, key, step["position"]):
                 continue
             try:
