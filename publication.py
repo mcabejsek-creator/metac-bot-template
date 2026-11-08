@@ -24,7 +24,8 @@ from publication_journal import (
     PublicationRejected, PublicationStore, PublicationUncertain, Publisher, canonical, digest,
 )
 from runtime_limits import check_blocking_cancelled
-from question_context import effective_close, utc_date, utc_now
+import question_context
+from question_context import effective_close, utc_date
 from forecast_validation import restore_typed_question, validate_operation, validate_plan
 
 
@@ -230,7 +231,7 @@ class SafePublicationMixin:
             (question.question_yes, question.question_no)
             if isinstance(question, ConditionalQuestion) else (question,)
         )
-        now = utc_date(utc_now())
+        now = utc_date(question_context.utc_now())
         for target in targets:
             start = utc_date(target.open_time)
             close = effective_close(target)
