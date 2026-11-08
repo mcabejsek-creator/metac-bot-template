@@ -10,6 +10,9 @@ on:
       - "scheduler_policy.py"
       - "dispatch_intent_controller.py"
       - "autonomous_orchestrator.py"
+      - "github_publisher_queue_readonly.py"
+      - "tests/test_github_publisher_queue_readonly.py"
+      - "docs/github_actions_support_evidence_20261108.md"
       - "tests/test_autonomous_orchestrator.py"
       - "docs/autonomous_orchestrator_dry_run_review_20261108.md"
       - "github_control_store.py"
@@ -70,9 +73,9 @@ jobs:
       - name: Install locked dependencies without executing bot
         run: poetry install --no-interaction --no-root
       - name: Static syntax and source checks
-        run: poetry run python -B -m py_compile autonomous_orchestrator.py tests/test_autonomous_orchestrator.py dispatch_intent_controller.py github_control_store.py tests/test_dispatch_intent_controller.py main.py perplexity_run_budget.py research_safety.py tests/test_perplexity_run_budget.py automatic_one_selection.py scheduler_policy.py tests/test_scheduler_policy.py sponsored_credit_guard.py tests/test_sponsored_credit_guard.py tests/test_automatic_one_selection.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tools/audit_publication_journal_readonly.py tests/test_bounded_open_question_selection.py
+        run: poetry run python -B -m py_compile github_publisher_queue_readonly.py tests/test_github_publisher_queue_readonly.py autonomous_orchestrator.py tests/test_autonomous_orchestrator.py dispatch_intent_controller.py github_control_store.py tests/test_dispatch_intent_controller.py main.py perplexity_run_budget.py research_safety.py tests/test_perplexity_run_budget.py automatic_one_selection.py scheduler_policy.py tests/test_scheduler_policy.py sponsored_credit_guard.py tests/test_sponsored_credit_guard.py tests/test_automatic_one_selection.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tools/audit_publication_journal_readonly.py tests/test_bounded_open_question_selection.py
       - name: Synthetic regression tests with socket-level network guard
-        run: poetry run python -B -m unittest tests.test_autonomous_orchestrator tests.test_dispatch_intent_controller tests.test_perplexity_run_budget tests.test_bounded_open_question_selection tests.test_automatic_one_selection tests.test_sponsored_credit_guard tests.test_scheduler_policy
+        run: poetry run python -B -m unittest tests.test_github_publisher_queue_readonly tests.test_autonomous_orchestrator tests.test_dispatch_intent_controller tests.test_perplexity_run_budget tests.test_bounded_open_question_selection tests.test_automatic_one_selection tests.test_sponsored_credit_guard tests.test_scheduler_policy
       - name: Manual-preflight logic self-check (synthetic only; no credentials)
         run: poetry run python -B tools/preflight_tournament_inventory_readonly.py --self-check
       - name: Authenticated journal audit offline self-check (synthetic only)
