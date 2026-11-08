@@ -364,7 +364,8 @@ class RemotePipelineTests(GitHubTestCase):
 
         second = self.bot(publish_reports_to_metaculus=True, metaculus_client=sink)
         second.publication_store = self.runner()
-        self.assertIsNot(first._publication_store, second._publication_store)
+        self.assertIsNot(first.publication_store, second.publication_store)
+        self.assertFalse(hasattr(second.publication_store, "path"))
         recovered = await second.forecast_question(q)
         self.assertEqual(recovered.model_dump(), report.model_dump())
         self.assertEqual(len(model_calls), model_count,
