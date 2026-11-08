@@ -495,6 +495,82 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
 class PublicationCancellationTests(RuntimeTestHelpers, OfflineTestCase):
     """Each fault is injected after observing its boundary, not a timed sleep."""
 
+    async def test_expired_question_blocks_new_forecast_without_claim_or_post(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import BinaryReport
+        from publication_journal import Publisher
+        now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+        q = question("japanese_diet")
+        expired = q.model_copy(update={"close_time": datetime(
+            2026, 11, 6, 11, 59, tzinfo=timezone.utc)})
+        # A formerly valid scheduled close must never override an earlier
+        # authoritative actual_close_time in the API snapshot.
+        actual_expired = q.model_copy(update={"api_json": {
+            "question": {"actual_close_time": "2026-11-06T11:59:00Z"}}})
+        for index, stale in enumerate((expired, actual_expired)):
+            report = BinaryReport(question=stale, prediction=.65, explanation="# Frozen synthetic report")
+            key = f"deadline-{index}/initial"
+            operations = [
+                {"kind": "forecast", "question_id": stale.id_of_question,
+                 "payload": {"probability_yes": .65}},
+                {"kind": "comment", "post_id": stale.id_of_post,
+                 "text": report.explanation, "is_private": True, "included_forecast": True},
+            ]
+            self.publication_store.prepare(
+                key, report.model_dump_json(exclude_computed_fields=True), operations)
+            writes = []
+            bot = self.bot()
+            with patch("question_context.utc_now", return_value=now):
+                with self.assertRaisesRegex(PublicationUncertain, "no new POST"):
+                    await bot._drain_publication(
+                        Publisher(self.publication_store, writes.append), key, stale)
+            self.assertEqual(writes, [])
+            self.assertEqual(
+                [step["state"] for step in self.publication_store.steps(key)],
+                ["ready", "ready"],
+            )
+
+    async def test_completed_forecast_comment_can_recover_after_close_without_new_forecast(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import BinaryReport
+        from publication_journal import Publisher
+        q = question("japanese_diet")
+        report = BinaryReport(question=q, prediction=.65, explanation="# Frozen synthetic report")
+        key = "expired-recovery/initial"
+        self.publication_store.prepare(
+            key, report.model_dump_json(exclude_computed_fields=True), [
+                {"kind": "forecast", "question_id": q.id_of_question,
+                 "payload": {"probability_yes": .65}},
+                {"kind": "comment", "post_id": q.id_of_post,
+                 "text": report.explanation, "is_private": True, "included_forecast": True},
+            ])
+        self.assertTrue(self.publication_store.claim(key, 0))
+        self.publication_store.finish(key, 0, "confirmed")
+        sent = []
+        bot = self.bot()
+        late_now = datetime(2026, 11, 7, 0, 30, tzinfo=timezone.utc)
+        with patch("question_context.utc_now", return_value=late_now):
+            await bot._drain_publication(
+                Publisher(self.publication_store, sent.append), key, q)
+        self.assertEqual([op["kind"] for op in sent], ["comment"])
+        self.assertEqual(
+            [step["state"] for step in self.publication_store.steps(key)],
+            ["confirmed", "confirmed"],
+        )
+
+    def test_conditional_branch_deadline_must_be_open_for_new_forecasts(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import ConditionalQuestion
+        q = question("japanese_diet")
+        closed_no = q.model_copy(update={"close_time": datetime(
+            2026, 11, 6, 11, 59, tzinfo=timezone.utc)})
+        conditional = ConditionalQuestion(
+            question_text="Synthetic conditional only",
+            parent=q, child=q, question_yes=q, question_no=closed_no)
+        bot = self.bot()
+        with self.assertRaisesRegex(PublicationUncertain, "no new POST"):
+            bot._require_forecast_window_open(conditional)
+
     async def cancelled_boundary(self, boundary, *, expire=False, remote=False):
         if remote:
             from .test_github_publication import MemoryGitHub, JournalCodec, GitHubContents, GitHubPublicationStore
