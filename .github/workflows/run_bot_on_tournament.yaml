@@ -31,10 +31,10 @@ on:
         description: "Confirm Perplexity API wallet automatic top-up is OFF"
         type: choice
         required: true
-        default: NO
+        default: "NO"
         options:
-          - NO
-          - YES
+          - "NO"
+          - "YES"
 
 permissions:
   contents: write
