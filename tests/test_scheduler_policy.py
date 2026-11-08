@@ -97,6 +97,11 @@ class FutureSchedulerPolicyTests(OfflineTestCase):
                     ))).reason,
                     "daily_spend_snapshot_stale",
                 )
+        for bad in (None, NOW.replace(tzinfo=None), "2026-11-08T12:00Z"):
+            with self.subTest(bad=bad):
+                self.assertEqual(evaluate_dispatch(accepted(
+                    daily_spend=replace(base, checked_at=bad),
+                )).reason, "daily_spend_snapshot_invalid")
         self.assertTrue(evaluate_dispatch(accepted(
             daily_spend=replace(base, checked_at=NOW-timedelta(minutes=5)),
         )).allowed)
