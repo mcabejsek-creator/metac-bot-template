@@ -45,6 +45,9 @@ from runtime_limits import RuntimeLimitsMixin, cancellable_cli
 from research_safety import agent_research, validate_research_text
 from forecast_validation import ForecastValidationMixin, structure_output
 from question_context import TARGET_PERIOD_NOTE, QuestionContextMixin, effective_close, measurement_context, utc_date
+from bounded_open_question_selection import (
+    BoundedPostReader, deduplicate_tournaments, scan_open_tournament,
+)
 
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
@@ -835,8 +838,38 @@ async def forecast_for_mode(template_bot, run_mode):
     async with template_bot.run_budget():
         client = MetaculusClient()
         if run_mode == "tournament":
-            seasonal = await template_bot.forecast_on_tournament(33121, return_exceptions=True)
-            minibench = await template_bot.forecast_on_tournament(client.CURRENT_MINIBENCH_ID, return_exceptions=True)
+            if template_bot.skip_previously_forecasted_questions is not True:
+                raise RuntimeError("Tournament mode requires skip-previously-forecasted")
+            # Complete BOTH bounded inventories before any forecast or paid model call.
+            # If any page is ambiguous, fail closed and publish nothing.
+            reader = BoundedPostReader(template_bot.metaculus_client)
+            seasonal_questions = scan_open_tournament(
+                template_bot.metaculus_client, 33121, read_page=reader,
+            )
+            minibench_questions = scan_open_tournament(
+                template_bot.metaculus_client, client.CURRENT_MINIBENCH_ID,
+                read_page=reader,
+            )
+            seasonal_questions, minibench_questions = deduplicate_tournaments(
+                seasonal_questions, minibench_questions,
+            )
+            # Empty authenticated inventories are a safe no-op: do not even
+            # initialize the remote publication journal or request model work.
+            # Keep the two-phase read-only scan above mandatory in all cases.
+            if not seasonal_questions and not minibench_questions:
+                return []
+            seasonal = (
+                await template_bot.forecast_questions(
+                    seasonal_questions, return_exceptions=True,
+                )
+                if seasonal_questions else []
+            )
+            minibench = (
+                await template_bot.forecast_questions(
+                    minibench_questions, return_exceptions=True,
+                )
+                if minibench_questions else []
+            )
             return seasonal + minibench
         if run_mode == "metaculus_cup":
             template_bot.skip_previously_forecasted_questions = False

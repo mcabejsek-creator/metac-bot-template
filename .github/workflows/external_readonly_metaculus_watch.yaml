@@ -1,0 +1,85 @@
+# Isolated external scheduler target. This workflow NEVER publishes forecasts.
+# Deliberately has NO schedule, no repository_dispatch, and no push trigger.
+# Publishing workflows are separate and require explicit one-run human approval.
+name: Vrchcab external read-only watch (never publishes)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "External scheduler may check post counts only"
+        type: choice
+        required: true
+        default: DO_NOT_RUN
+        options:
+          - DO_NOT_RUN
+          - CHECK_OPEN_POSTS_READ_ONLY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vrchcab-external-watch-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  offline_safety:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.mode == 'CHECK_OPEN_POSTS_READ_ONLY' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      OPENAI_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      PERPLEXITY_API_KEY: ""
+      EXA_API_KEY: ""
+      ASKNEWS_API_KEY: ""
+      ASKNEWS_CLIENT_ID: ""
+      ASKNEWS_SECRET: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify authenticated GET-only request shape (OFFLINE)
+        run: python -B tools/watch_open_metaculus_questions_readonly.py --self-check
+      - name: Run strict offline read-only watcher regressions
+        run: python -B tools/test_watch_open_metaculus_questions_readonly.py
+
+  watch_first_pages_readonly:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.mode == 'CHECK_OPEN_POSTS_READ_ONLY' &&
+      github.run_attempt == 1
+    needs: offline_safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      OPENAI_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      PERPLEXITY_API_KEY: ""
+      EXA_API_KEY: ""
+      ASKNEWS_API_KEY: ""
+      ASKNEWS_CLIENT_ID: ""
+      ASKNEWS_SECRET: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Read-only two-Metaculus-GET monitor; NO publishing, IDs or paid models
+        env:
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+        run: python -B tools/watch_open_metaculus_questions_readonly.py --check-public-open-posts

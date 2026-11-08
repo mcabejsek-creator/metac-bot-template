@@ -204,17 +204,97 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
     async def test_both_tournaments_share_one_total_budget(self):
         bot = self.bot()
         calls, observed = [], self.timeout_probe()
+        identifiers = [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID]
+        scan_completed = []
 
-        async def forecast(identifier, return_exceptions):
-            self.assertTrue(return_exceptions)
-            calls.append(identifier)
+        def scan(client, identifier, *, read_page):
+            self.assertIs(client, bot.metaculus_client)
+            scan_completed.append(identifier)
             return [identifier]
 
-        self.start_patch(patch.object(bot, "forecast_on_tournament", forecast))
+        async def forecast(questions, return_exceptions):
+            self.assertTrue(return_exceptions)
+            # All read-only scans must have succeeded before forecasting starts.
+            self.assertEqual(scan_completed, identifiers)
+            calls.extend(questions)
+            return list(questions)
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
         reports = await app.forecast_for_mode(bot, "tournament")
-        self.assertEqual(calls, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
-        self.assertEqual(reports, calls)
+        self.assertEqual(calls, identifiers)
+        self.assertEqual(reports, identifiers)
         self.assertEqual(sum(budget == 10800 for budget, _ in observed), 1)
+
+    async def test_empty_both_tournament_scans_never_initialize_publication(self):
+        # A real empty snapshot must not touch the remote journal, model
+        # gateway or POST path even if publishing is configured.
+        bot = self.bot(publish_reports_to_metaculus=True)
+        scanned = []
+
+        def scan(client, tournament, *, read_page):
+            self.assertIs(client, bot.metaculus_client)
+            scanned.append(tournament)
+            return []
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(
+            bot, "forecast_questions",
+            side_effect=AssertionError("No empty forecast batch may reach the publisher")))
+        self.start_patch(patch.object(
+            bot, "_publication_runtime",
+            side_effect=AssertionError("Remote publication journal must not open")))
+        result = await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(result, [])
+        self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+        self.assertEqual(self.publication_store.pending("synthetic"), None)
+
+    async def test_only_nonempty_tournament_is_forecast(self):
+        bot = self.bot()
+        scans, forecast_calls = [], []
+
+        def scan(client, tournament, *, read_page):
+            scans.append(tournament)
+            return [] if len(scans) == 1 else [3]
+
+        async def forecast(questions, return_exceptions):
+            self.assertEqual(scans, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+            self.assertTrue(return_exceptions)
+            forecast_calls.append(list(questions))
+            return list(questions)
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        result = await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(result, [3])
+        self.assertEqual(forecast_calls, [[3]])
+
+    async def test_failed_second_scan_never_starts_forecasting(self):
+        bot = self.bot()
+        scanned, forecasts_started = [], []
+
+        def scan(client, tournament, *, read_page):
+            scanned.append(tournament)
+            if len(scanned) == 2:
+                raise RuntimeError("Synthetic incomplete second tournament")
+            return [1]
+
+        async def forecast(*args, **kwargs):
+            forecasts_started.append(True)
+            raise AssertionError("No forecast is allowed after incomplete inventory")
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        with self.assertRaisesRegex(RuntimeError, "incomplete second tournament"):
+            await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+        self.assertEqual(forecasts_started, [])
 
     async def test_run_deadline_also_covers_tournament_retrieval(self):
         bot = self.bot()
@@ -414,6 +494,82 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
 
 class PublicationCancellationTests(RuntimeTestHelpers, OfflineTestCase):
     """Each fault is injected after observing its boundary, not a timed sleep."""
+
+    async def test_expired_question_blocks_new_forecast_without_claim_or_post(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import BinaryReport
+        from publication_journal import Publisher
+        now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+        q = question("japanese_diet")
+        expired = q.model_copy(update={"close_time": datetime(
+            2026, 11, 6, 11, 59, tzinfo=timezone.utc)})
+        # A formerly valid scheduled close must never override an earlier
+        # authoritative actual_close_time in the API snapshot.
+        actual_expired = q.model_copy(update={"api_json": {
+            "question": {"actual_close_time": "2026-11-06T11:59:00Z"}}})
+        for index, stale in enumerate((expired, actual_expired)):
+            report = BinaryReport(question=stale, prediction=.65, explanation="# Frozen synthetic report")
+            key = f"deadline-{index}/initial"
+            operations = [
+                {"kind": "forecast", "question_id": stale.id_of_question,
+                 "payload": {"probability_yes": .65}},
+                {"kind": "comment", "post_id": stale.id_of_post,
+                 "text": report.explanation, "is_private": True, "included_forecast": True},
+            ]
+            self.publication_store.prepare(
+                key, report.model_dump_json(exclude_computed_fields=True), operations)
+            writes = []
+            bot = self.bot()
+            with patch("question_context.utc_now", return_value=now):
+                with self.assertRaisesRegex(PublicationUncertain, "no new POST"):
+                    await bot._drain_publication(
+                        Publisher(self.publication_store, writes.append), key, stale)
+            self.assertEqual(writes, [])
+            self.assertEqual(
+                [step["state"] for step in self.publication_store.steps(key)],
+                ["ready", "ready"],
+            )
+
+    async def test_completed_forecast_comment_can_recover_after_close_without_new_forecast(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import BinaryReport
+        from publication_journal import Publisher
+        q = question("japanese_diet")
+        report = BinaryReport(question=q, prediction=.65, explanation="# Frozen synthetic report")
+        key = "expired-recovery/initial"
+        self.publication_store.prepare(
+            key, report.model_dump_json(exclude_computed_fields=True), [
+                {"kind": "forecast", "question_id": q.id_of_question,
+                 "payload": {"probability_yes": .65}},
+                {"kind": "comment", "post_id": q.id_of_post,
+                 "text": report.explanation, "is_private": True, "included_forecast": True},
+            ])
+        self.assertTrue(self.publication_store.claim(key, 0))
+        self.publication_store.finish(key, 0, "confirmed")
+        sent = []
+        bot = self.bot()
+        late_now = datetime(2026, 11, 7, 0, 30, tzinfo=timezone.utc)
+        with patch("question_context.utc_now", return_value=late_now):
+            await bot._drain_publication(
+                Publisher(self.publication_store, sent.append), key, q)
+        self.assertEqual([op["kind"] for op in sent], ["comment"])
+        self.assertEqual(
+            [step["state"] for step in self.publication_store.steps(key)],
+            ["confirmed", "confirmed"],
+        )
+
+    def test_conditional_branch_deadline_must_be_open_for_new_forecasts(self):
+        from datetime import datetime, timezone
+        from forecasting_tools import ConditionalQuestion
+        q = question("japanese_diet")
+        closed_no = q.model_copy(update={"close_time": datetime(
+            2026, 11, 6, 11, 59, tzinfo=timezone.utc)})
+        conditional = ConditionalQuestion(
+            question_text="Synthetic conditional only",
+            parent=q, child=q, question_yes=q, question_no=closed_no)
+        bot = self.bot()
+        with self.assertRaisesRegex(PublicationUncertain, "no new POST"):
+            bot._require_forecast_window_open(conditional)
 
     async def cancelled_boundary(self, boundary, *, expire=False, remote=False):
         if remote:
