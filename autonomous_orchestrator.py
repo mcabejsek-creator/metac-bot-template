@@ -13,6 +13,7 @@ auditable provider-verified implementation and separate user authorization.
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
+import worker_configuration
 
 from dispatch_intent_controller import (
     ControllerState, ReservationResult, InvalidControlState,
@@ -195,9 +196,11 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
     This gate is not wired into a CLI, workflow, or the live manual publisher.
     'now' may be a fixed offline instant or an injected clock. A real reader
     needs the clock so evidence is evaluated AFTER the reads, not before them.
-    The caller's research parameters are denial filters, never proof of the
-    actual worker configuration. Until a trusted binding exists, even an
-    otherwise consistent preview must be denied.
+    Research parameters are optional consistency claims, never configuration
+    or identity evidence. The actual plan comes from the same immutable
+    source-controlled settings main uses. This does not attest which code,
+    mode or configuration a remote worker would actually execute; absent
+    that independent identity binding, the final decision remains DENY.
     """
     if activation_confirmed is not True:
         return ControllerTick(False, "worker_activation_not_confirmed")
@@ -217,14 +220,18 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
     if not timedelta(0) <= instant - reserved <= STATUS_MAX_AGE:
         return ControllerTick(False, "worker_intent_expired_or_future")
 
-    # main.run_research uses initial + fact-check for EVERY report. Do not
-    # silently lower ensemble quality, disable research or raise the two-POST
-    # automatic cap to make the current two-report configuration pass.
-    if (type(researcher) is not str or researcher != "perplexity-agent"
-            or type(research_reports_per_question) is not int
-            or research_reports_per_question < 1):
-        return ControllerTick(False, "worker_research_plan_unverified")
-    if 2 * research_reports_per_question > MAX_AUTO_AGENT_POST_ATTEMPTS:
+    config = worker_configuration.WORKER_CONFIG
+    if type(config) is not worker_configuration.WorkerConfiguration:
+        return ControllerTick(False, "worker_configuration_unavailable")
+    # Compatibility claims may reject a mismatch, but never override main's
+    # shared configuration. No caller-supplied configuration object is used.
+    if ((researcher is not None
+         and (type(researcher) is not str or researcher != config.researcher))
+            or (research_reports_per_question is not None
+                and (type(research_reports_per_question) is not int
+                     or research_reports_per_question != config.research_reports_per_question))):
+        return ControllerTick(False, "worker_configuration_mismatch")
+    if config.agent_requests_per_atomic_question > MAX_AUTO_AGENT_POST_ATTEMPTS:
         return ControllerTick(False, "worker_research_plan_exceeds_automatic_attempt_cap")
 
     readings = source.read()
@@ -268,10 +275,12 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
     observed, observed_revision = store.read()
     if observed != state or observed_revision != revision:
         return ControllerTick(False, "worker_control_state_changed_during_preflight")
-    # No trusted binding currently connects the caller's report count to the
-    # worker that would execute it. In particular, claiming one report cannot
-    # make main.py's two-report/four-request process fit the two-request cap.
-    return ControllerTick(False, "worker_research_plan_not_bound_to_configuration", intent_id)
+    if worker_configuration.WORKER_CONFIG != config:
+        return ControllerTick(False, "worker_configuration_changed_during_preflight")
+    # Shared settings establish the source plan, not an approved artifact or
+    # the identity of the actually executing worker. SHA/mode claims or local
+    # checkout metadata cannot supply that missing proof. Never approve here.
+    return ControllerTick(False, "worker_execution_identity_unverified", intent_id)
 
 
 def persist_emergency_stop(store, *, operator_stop_authorized=False):
