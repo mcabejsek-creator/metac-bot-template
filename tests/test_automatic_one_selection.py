@@ -113,9 +113,61 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         self.start_patch(patch.object(app, "select_one_automatic_candidate",
                                       lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
         self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        self.start_patch(patch.dict("os.environ", {
+            "OPENROUTER_API_KEY": "sk-or-v1-test-key-9fc",
+            "METACULUS_SPONSORED_KEY_SUFFIX": "9fc",
+        }))
+        verified = []
+        def fake_credit_check(key, *, expected_suffix):
+            verified.append((key.endswith("9fc"), expected_suffix))
+            return {"remaining_usd": "34.29481"}
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", fake_credit_check))
         result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+        self.assertEqual(verified, [(True, "9fc")])
         self.assertEqual(result, [early])
         self.assertEqual(submitted, [early])
+
+    async def test_no_candidate_calls_no_credit_api_or_model(self):
+        bot = self.bot()
+        scanned = []
+        def scan(client, tournament, *, read_page):
+            scanned.append(tournament)
+            return []
+        def forbidden_credit(*args, **kwargs):
+            raise AssertionError("No candidate must never query credits")
+        async def forbidden_forecast(*args, **kwargs):
+            raise AssertionError("No candidate must never call a paid model")
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", forbidden_credit))
+        self.start_patch(patch.object(bot, "forecast_questions", forbidden_forecast))
+        result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+        self.assertEqual(result, [])
+        self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+
+    async def test_credit_denial_precedes_all_model_calls(self):
+        candidate = atomic(post_id=973, qid=773, hours_left=4)
+        bot = self.bot()
+        def scan(client, tournament, *, read_page):
+            return [candidate] if tournament == 33121 else []
+        def denied(*args, **kwargs):
+            from sponsored_credit_guard import SponsoredCreditUnavailable
+            raise SponsoredCreditUnavailable("Donation exhausted")
+        async def forbidden_forecast(*args, **kwargs):
+            raise AssertionError("Credit denial must prevent all model and journal calls")
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", denied))
+        self.start_patch(patch.object(bot, "forecast_questions", forbidden_forecast))
+        self.start_patch(patch.dict("os.environ", {
+            "OPENROUTER_API_KEY": "sk-or-v1-test-key-9fc",
+            "METACULUS_SPONSORED_KEY_SUFFIX": "9fc",
+        }))
+        from sponsored_credit_guard import SponsoredCreditUnavailable
+        with self.assertRaises(SponsoredCreditUnavailable):
+            await app.forecast_for_mode(bot, "tournament", automatic_one=True)
 
     def test_no_production_trigger_or_cost_unverified_activation(self):
         main_source = (ROOT / "main.py").read_text()
