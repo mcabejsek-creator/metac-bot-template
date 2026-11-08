@@ -92,7 +92,7 @@ def _candidate_check(first, second, candidate_id):
     )
     return {
         "observed_question_type": (
-            q.question_type if matched and q.question_type in
+            q.question_type if matched and getattr(q, "question_type", None) in
             ("binary", "multiple_choice", "numeric", "discrete", "date", "conditional")
             else None
         ),
