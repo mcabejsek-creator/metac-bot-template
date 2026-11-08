@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from forecasting_tools import BinaryQuestion
+from forecasting_tools import BinaryQuestion, MultipleChoiceQuestion, NumericQuestion, DateQuestion
+from forecasting_tools.data_models.questions import DiscreteQuestion
 
 # Running as a script from tools/ must still import the repository root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -77,7 +78,25 @@ def _candidate_check(first, second, candidate_id):
         and q.question_type == "binary"
         and q.already_forecasted is False
     )
+    atomic_type_by_class = {
+        BinaryQuestion: "binary",
+        MultipleChoiceQuestion: "multiple_choice",
+        NumericQuestion: "numeric",
+        DiscreteQuestion: "discrete",
+        DateQuestion: "date",
+    }
+    atomic_kind = atomic_type_by_class.get(type(q)) if matched else None
+    valid_atomic = (
+        matched and atomic_kind is not None and q.question_type == atomic_kind
+        and q.already_forecasted is False
+    )
     return {
+        "observed_question_type": (
+            q.question_type if matched and q.question_type in
+            ("binary", "multiple_choice", "numeric", "discrete", "date", "conditional")
+            else None
+        ),
+        "single_supported_atomic_unforecasted_in_token_snapshot": bool(valid_atomic),
         "present_once_in_validated_open_inventory": matched,
         "binary_with_empty_token_forecast_history_in_snapshot": bool(eligible_binary),
         "historical_outcomes_fully_reconciled": False,
@@ -189,6 +208,8 @@ def self_check():
     assert check["present_once_in_validated_open_inventory"] is True
     assert check["binary_with_empty_token_forecast_history_in_snapshot"] is False
     assert check["live_publication_authorized"] is False
+    assert check["observed_question_type"] is None  # synthetic objects have no type info
+    assert check["single_supported_atomic_unforecasted_in_token_snapshot"] is False
     assert "111" not in json.dumps(with_candidate)
     assert "311" not in json.dumps(with_candidate)
     assert with_candidate["authenticated_get_attempts"] == 6
