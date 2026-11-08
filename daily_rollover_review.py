@@ -16,7 +16,7 @@ from dispatch_intent_controller import ControllerState, DailyQuota
 
 MAX_EVIDENCE_AGE = timedelta(minutes=5)
 ONE_DAY_APPROVAL = "APPROVE_ONE_DISABLED_UTC_DAY_REVIEW"
-_MONEY = re.compile(r"[0-9]+(?:\\.[0-9]{1,6})?\\Z")
+_MONEY = re.compile(r"[0-9]+(?:\.[0-9]{1,6})?\Z")
 
 
 @dataclass(frozen=True)
