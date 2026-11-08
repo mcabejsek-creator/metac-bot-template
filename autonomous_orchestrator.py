@@ -16,9 +16,10 @@ import re
 
 from dispatch_intent_controller import (
     ControllerState, ReservationResult, InvalidControlState,
-    propose_reservation, reserve_with_store, disable_controller,
+    propose_reservation, reserve_with_store, disable_controller, _strict_money,
 )
 from scheduler_policy import DailySpendEvidence, DispatchSnapshot, STATUS_MAX_AGE
+from perplexity_run_budget import MAX_AUTO_AGENT_POST_ATTEMPTS
 
 
 class AutonomousPreflightRejected(RuntimeError):
@@ -175,6 +176,102 @@ def reserve_only_after_preflight(store, source, *, now, approval_epoch,
         reservation.allowed, reservation.reason, reservation.intent_id,
         reservation.allowed and reservation.reason == "durably_reserved_not_dispatched",
     )
+
+
+def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
+                                    approval_epoch=None,
+                                    activation_confirmed=False,
+                                    researcher=None,
+                                    research_reports_per_question=None):
+    """Read-only admission preview for ONE atomic automatic-question worker.
+
+    Unlike evaluate_offline_tick, this requires an ALREADY reserved intent.
+    Its attempt/reserve are checked, never charged a second time. All readers
+    must be trusted in production; Python flags do not authenticate evidence.
+
+    This does NOT consume/claim the intent or invoke a worker. A durable
+    single-worker claim and independent per-request stop/budget checks remain
+    prerequisites to execution. Repeated previews are NOT launch permission.
+    This gate is not wired into a CLI, workflow, or the live manual publisher.
+    'now' may be a fixed offline instant or an injected clock. A real reader
+    needs the clock so evidence is evaluated AFTER the reads, not before them.
+    The caller's research parameters are denial filters, never proof of the
+    actual worker configuration. Until a trusted binding exists, even an
+    otherwise consistent preview must be denied.
+    """
+    if activation_confirmed is not True:
+        return ControllerTick(False, "worker_activation_not_confirmed")
+    state, revision = store.read()
+    if not isinstance(state, ControllerState) or not isinstance(revision, str) or not revision:
+        raise AutonomousPreflightRejected("Missing persistent controller state")
+    if state.enabled is not True:
+        return ControllerTick(False, "persistent_kill_switch_disabled")
+    if type(approval_epoch) is not int or approval_epoch != state.approval_epoch:
+        return ControllerTick(False, "approval_generation_mismatch")
+    if state.pending is None:
+        return ControllerTick(False, "worker_intent_not_reserved")
+    if type(intent_id) is not str or intent_id != state.pending.intent_id:
+        return ControllerTick(False, "worker_intent_mismatch")
+    instant = _now(now() if callable(now) else now)
+    reserved = datetime.fromisoformat(state.pending.reserved_at.replace("Z", "+00:00"))
+    if not timedelta(0) <= instant - reserved <= STATUS_MAX_AGE:
+        return ControllerTick(False, "worker_intent_expired_or_future")
+
+    # main.run_research uses initial + fact-check for EVERY report. Do not
+    # silently lower ensemble quality, disable research or raise the two-POST
+    # automatic cap to make the current two-report configuration pass.
+    if (type(researcher) is not str or researcher != "perplexity-agent"
+            or type(research_reports_per_question) is not int
+            or research_reports_per_question < 1):
+        return ControllerTick(False, "worker_research_plan_unverified")
+    if 2 * research_reports_per_question > MAX_AUTO_AGENT_POST_ATTEMPTS:
+        return ControllerTick(False, "worker_research_plan_exceeds_automatic_attempt_cap")
+
+    readings = source.read()
+    after_read = _now(now() if callable(now) else now)
+    if after_read < instant:
+        return ControllerTick(False, "worker_clock_moved_backwards")
+    instant = after_read
+    if not timedelta(0) <= instant - reserved <= STATUS_MAX_AGE:
+        return ControllerTick(False, "worker_intent_expired_or_future")
+    snapshot = build_dispatch_snapshot(readings, now=instant, last_dispatch_at=None)
+    # Evidence from before reservation cannot corroborate the reserved attempt.
+    for stamp in (
+        readings.github_checked_at, readings.funded_openrouter_checked_at,
+        readings.perplexity_checked_at, readings.journal_checked_at,
+        readings.daily_spend.checked_at,
+    ):
+        if _now(stamp) < reserved:
+            return ControllerTick(False, "worker_sources_predate_intent")
+    budget, quota = snapshot.daily_spend, state.daily_quota
+    if (quota is None or budget.complete is not True
+            or budget.day_utc != instant.date()
+            or quota.day_utc != instant.date().isoformat()
+            or type(budget.attempted_dispatches) is not int
+            or type(budget.max_daily_dispatches) is not int
+            or budget.max_daily_dispatches <= 0
+            or budget.attempted_dispatches != quota.attempts
+            or not 1 <= quota.attempts <= budget.max_daily_dispatches):
+        return ControllerTick(False, "worker_reserved_daily_quota_unverified")
+    try:
+        charged = _strict_money(budget.charged_usd)
+        cap = _strict_money(budget.approved_day_cap_usd)
+        reserve = _strict_money(budget.approved_run_reserve_usd)
+        held = _strict_money(quota.reserved_usd)
+    except InvalidControlState:
+        return ControllerTick(False, "worker_reserved_daily_budget_unverified")
+    # Do not add another allowance to 'held' or increment attempts: the CAS
+    # already reserved this run. New observed charges must still leave its
+    # planned allowance. Exhausting the LAST approved attempt slot is valid.
+    if cap <= 0 or reserve <= 0 or held < reserve or max(held, charged + reserve) > cap:
+        return ControllerTick(False, "worker_reserved_daily_budget_unverified")
+    observed, observed_revision = store.read()
+    if observed != state or observed_revision != revision:
+        return ControllerTick(False, "worker_control_state_changed_during_preflight")
+    # No trusted binding currently connects the caller's report count to the
+    # worker that would execute it. In particular, claiming one report cannot
+    # make main.py's two-report/four-request process fit the two-request cap.
+    return ControllerTick(False, "worker_research_plan_not_bound_to_configuration", intent_id)
 
 
 def persist_emergency_stop(store, *, operator_stop_authorized=False):
