@@ -199,30 +199,48 @@ async def retry_research(operation, *, attempts, budget, phase, denied, provider
                     raise ResearchDeadlineExceeded("Research deadline expired during backoff")
 
 
-def call_agent_once(prompt, deadline_at):
+def call_agent_once(prompt, deadline_at, guard=None):
     check_blocking_cancelled()
     remaining = deadline_at - time.monotonic()
     if remaining <= 0:
         raise ResearchDeadlineExceeded("Agent deadline expired before sending")
-    request = urllib.request.Request(AGENT_URL,
-        data=json.dumps({"preset": "fast", "input": prompt}).encode("utf-8"),
-        headers={"Authorization": f"Bearer {os.environ['PERPLEXITY_API_KEY']}", "Content-Type": "application/json"},
-        method="POST")
-    with urllib.request.urlopen(request, timeout=min(180, remaining)) as response:
-        try:
-            data = json.loads(response.read().decode("utf-8"))
-        except (ValueError, UnicodeError) as error:
-            raise ResearchValidationError("Agent returned invalid JSON") from error
-    return parse_agent_response(data)
+    if guard is not None:
+        guard.begin_attempt()
+    try:
+        request = urllib.request.Request(AGENT_URL,
+            data=json.dumps({"preset": "fast", "input": prompt}).encode("utf-8"),
+            headers={"Authorization": f"Bearer {os.environ['PERPLEXITY_API_KEY']}", "Content-Type": "application/json"},
+            method="POST")
+        with urllib.request.urlopen(request, timeout=min(180, remaining)) as response:
+            try:
+                data = json.loads(response.read().decode("utf-8"))
+            except (ValueError, UnicodeError) as error:
+                raise ResearchValidationError("Agent returned invalid JSON") from error
+        # Before returning any research, enforce provider-reported cost.
+        if guard is not None:
+            guard.record_response(data)
+        return parse_agent_response(data)
+    except BaseException:
+        # A transmitted request may have been billed despite a lost response.
+        if guard is not None:
+            guard.abandon_unknown_response()
+        raise
 
 
 async def agent_research(bot, prompt, *, phase):
     budget = bot.runtime_limits.agent_seconds
+    guard = getattr(bot, "_automatic_perplexity_budget", None)
 
     async def attempt(deadline_at):
+        if guard is not None:
+            # No retries: a timed-out POST can already have been billed.
+            from perplexity_run_budget import PerplexityAutoRunBudget
+            if not isinstance(guard, PerplexityAutoRunBudget):
+                raise ResearchValidationError("Invalid automatic Perplexity guard")
+            return await bot._run_blocking(call_agent_once, prompt, deadline_at, guard, _timeout=budget)
         return await bot._run_blocking(call_agent_once, prompt, deadline_at, _timeout=budget)
 
-    return await retry_research(attempt, attempts=AGENT_ATTEMPTS, budget=budget,
+    return await retry_research(attempt, attempts=1 if guard is not None else AGENT_ATTEMPTS, budget=budget,
                                 phase=phase, denied=denial_cache(bot), provider="agent")
 
 
