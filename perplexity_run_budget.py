@@ -8,6 +8,7 @@ a single already-sent request, guarantee wallet funds or reconcile other users.
 Automatic activation needs a separately reviewed provider-side spending cap.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from threading import Lock
@@ -16,6 +17,24 @@ MAX_AUTO_AGENT_POST_ATTEMPTS = 2  # future unattended path: one research + fact-
 MAX_SUPERVISED_AGENT_POST_ATTEMPTS = 4  # two reports x (research + fact-check); no retries
 MAX_ATTESTATION_AGE = timedelta(hours=6)
 MINIMUM_WALLET_RESERVE_USD = Decimal("2.00")
+
+
+@dataclass(frozen=True)
+class PerplexityCostObservation:
+    """Per-run provider RESPONSE evidence, never an independent billing audit.
+
+    Missing/malformed/timeout responses may still be charged. These fields
+    never authorize a fresh daily budget, refund a reserve, or start a job.
+    """
+    attempted_requests: int
+    priced_responses: int
+    unpriced_attempts: int
+    response_costs_usd: tuple[str, ...]
+    total_response_cost_usd: str
+    request_in_flight: bool
+    outcome_uncertain: bool
+    provider_invoice_verified: bool = False
+    eligible_for_automatic_daily_reset: bool = False
 
 
 class PerplexityBudgetUnavailable(RuntimeError):
@@ -79,6 +98,7 @@ class PerplexityAutoRunBudget:
             raise PerplexityBudgetUnavailable("Insufficient verified Perplexity reserve")
         self._used = Decimal("0")
         self._attempts = 0
+        self._response_costs = []
         self._inflight = False
         self._outcome_uncertain = False
         self._lock = Lock()
@@ -123,6 +143,7 @@ class PerplexityAutoRunBudget:
                 self._inflight = False
                 raise PerplexityBudgetUnavailable("Agent cost absent or invalid; stop research") from None
             self._used += amount
+            self._response_costs.append(amount)
             self._inflight = False
             if self._used > self._cap:
                 self._outcome_uncertain = True
@@ -134,6 +155,25 @@ class PerplexityAutoRunBudget:
             if self._inflight:
                 self._inflight = False
                 self._outcome_uncertain = True
+
+    def cost_observation(self):
+        """Expose only sanitized returned-cost evidence, not invoice proof.
+
+        The number of unpriced attempts is conservative: each request is
+        counted before transmission. A network failure must never be
+        converted to a zero-dollar receipt, including after UTC midnight.
+        """
+        with self._lock:
+            observed = tuple(format(cost, "f") for cost in self._response_costs)
+            return PerplexityCostObservation(
+                attempted_requests=self._attempts,
+                priced_responses=len(observed),
+                unpriced_attempts=self._attempts - len(observed),
+                response_costs_usd=observed,
+                total_response_cost_usd=format(self._used, "f"),
+                request_in_flight=self._inflight,
+                outcome_uncertain=self._outcome_uncertain,
+            )
 
     @property
     def attempts(self):

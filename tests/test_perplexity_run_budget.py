@@ -95,6 +95,99 @@ class PerplexityRunBudgetTests(OfflineTestCase):
         with self.assertRaises(PerplexityBudgetUnavailable):
             guard.begin_attempt()
 
+    def test_cost_observation_separates_returned_prices_from_actual_billing(self):
+        guard = permitted()
+        initial = guard.cost_observation()
+        self.assertEqual(initial.attempted_requests, 0)
+        self.assertEqual(initial.priced_responses, 0)
+        self.assertEqual(initial.unpriced_attempts, 0)
+        self.assertFalse(initial.provider_invoice_verified)
+        self.assertFalse(initial.eligible_for_automatic_daily_reset)
+
+        # The paid attempt is counted BEFORE outbound transmission.
+        guard.begin_attempt()
+        inflight = guard.cost_observation()
+        self.assertEqual(inflight.attempted_requests, 1)
+        self.assertEqual(inflight.unpriced_attempts, 1)
+        self.assertTrue(inflight.request_in_flight)
+        self.assertFalse(inflight.eligible_for_automatic_daily_reset)
+
+        guard.record_response(agent_data(0.0375))
+        guard.begin_attempt()
+        guard.record_response(agent_data(0.0125))
+        recorded = guard.cost_observation()
+        self.assertEqual(recorded.attempted_requests, 2)
+        self.assertEqual(recorded.priced_responses, 2)
+        self.assertEqual(recorded.unpriced_attempts, 0)
+        self.assertEqual(recorded.response_costs_usd, ("0.0375", "0.0125"))
+        self.assertEqual(recorded.total_response_cost_usd, "0.0500")
+        self.assertFalse(recorded.request_in_flight)
+        self.assertFalse(recorded.outcome_uncertain)
+        self.assertFalse(recorded.provider_invoice_verified)
+        self.assertFalse(recorded.eligible_for_automatic_daily_reset)
+
+    def test_timeout_keeps_unpriced_attempt_and_cannot_claim_zero_cost(self):
+        guard = permitted()
+        guard.begin_attempt()
+        guard.record_response(agent_data(0.02))
+        guard.begin_attempt()
+        guard.abandon_unknown_response()
+        observation = guard.cost_observation()
+        self.assertEqual(observation.attempted_requests, 2)
+        self.assertEqual(observation.priced_responses, 1)
+        self.assertEqual(observation.unpriced_attempts, 1)
+        self.assertEqual(observation.total_response_cost_usd, "0.02")
+        self.assertTrue(observation.outcome_uncertain)
+        self.assertFalse(observation.provider_invoice_verified)
+        with self.assertRaises(PerplexityBudgetUnavailable):
+            guard.begin_attempt()
+
+    def test_missing_cost_stays_unpriced_and_prevents_further_billing(self):
+        guard = permitted()
+        guard.begin_attempt()
+        with self.assertRaises(PerplexityBudgetUnavailable):
+            guard.record_response({"status": "completed", "usage": {"cost": {}}})
+        observation = guard.cost_observation()
+        self.assertEqual(observation.attempted_requests, 1)
+        self.assertEqual(observation.priced_responses, 0)
+        self.assertEqual(observation.unpriced_attempts, 1)
+        self.assertTrue(observation.outcome_uncertain)
+        self.assertEqual(observation.total_response_cost_usd, "0")
+        self.assertFalse(observation.eligible_for_automatic_daily_reset)
+
+    def test_over_run_cost_preserves_observed_charge_even_when_denied(self):
+        guard = permitted(run_cap_usd="0.10")
+        guard.begin_attempt()
+        with self.assertRaises(PerplexityBudgetUnavailable):
+            guard.record_response(agent_data(0.19))
+        observation = guard.cost_observation()
+        self.assertEqual(observation.response_costs_usd, ("0.19",))
+        self.assertEqual(observation.total_response_cost_usd, "0.19")
+        self.assertEqual(observation.unpriced_attempts, 0)
+        self.assertTrue(observation.outcome_uncertain)
+        self.assertFalse(observation.eligible_for_automatic_daily_reset)
+
+    def test_cost_observation_cannot_expose_raw_research_or_credentials(self):
+        guard = permitted()
+        response = agent_data("0.01")
+        response["output"][0]["content"][0]["text"] = "PRIVATE PROMPT / RESEARCH"
+        response["api_key"] = "SYNTHETIC_SECRET"
+        guard.begin_attempt()
+        guard.record_response(response)
+        result = repr(guard.cost_observation())
+        self.assertNotIn("PRIVATE PROMPT", result)
+        self.assertNotIn("SYNTHETIC_SECRET", result)
+        self.assertEqual(guard.cost_observation().response_costs_usd, ("0.01",))
+
+    def test_cost_observation_cannot_mutate_guard_state(self):
+        guard = permitted()
+        guard.begin_attempt()
+        guard.record_response(agent_data(0.01))
+        before = guard.cost_observation()
+        with self.assertRaises((AttributeError, TypeError)):
+            before.attempted_requests = 0
+        self.assertEqual(guard.cost_observation(), before)
+
     def test_manual_two_report_budget_allows_exactly_four_no_retry_attempts(self):
         self.assertEqual(MAX_SUPERVISED_AGENT_POST_ATTEMPTS, 4)
         guard = permitted(max_attempts=MAX_SUPERVISED_AGENT_POST_ATTEMPTS)
