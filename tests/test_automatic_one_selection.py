@@ -164,6 +164,11 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
         self.start_patch(patch.object(app, "scan_open_tournament", scan))
         self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        # Fix the synthetic clock: test data closes relative to NOW, never
+        # relative to the real runner clock. Otherwise the test starts
+        # failing hours later although no production behavior changed.
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
         self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", denied))
         self.start_patch(patch.object(bot, "forecast_questions", forbidden_forecast))
         self.start_patch(patch.dict("os.environ", {
