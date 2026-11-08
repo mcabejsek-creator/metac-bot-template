@@ -130,9 +130,25 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         self.start_patch(patch.object(app, "scan_open_tournament", scan))
         self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
         self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        # The production manual path now requires read-only donated funding
+        # evidence and explicit bounded Perplexity approval BEFORE forecasting.
+        verified = []
+        def funded(key, *, expected_suffix):
+            verified.append((key, expected_suffix))
+            return {"remaining_usd": "34.29481"}
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", funded))
+        self.start_patch(patch("perplexity_run_budget.PerplexityAutoRunBudget",
+                               return_value=object()))
+        self.start_patch(patch.dict("os.environ", {
+            "OPENROUTER_API_KEY": "synthetic-donated-9fc",
+            "METACULUS_SPONSORED_KEY_SUFFIX": "9fc",
+            "PERPLEXITY_MANUAL_RESEARCH_APPROVAL": "APPROVE_FOUR_AGENT_REQUESTS",
+        }))
         result = await app.forecast_for_mode(bot, "tournament", first_live_post_id=90102)
         self.assertEqual(result, [b])
         self.assertEqual(published_batches, [[b]])
+        self.assertEqual(verified, [("synthetic-donated-9fc", "9fc")])
+        self.assertIsNone(bot._automatic_perplexity_budget)
 
     async def test_missing_first_live_id_blocks_all_forecasts(self):
         a, b = self.cases()
