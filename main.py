@@ -833,8 +833,33 @@ For differences, margins, spreads, or leads between two percentages or proportio
         )
 
 
-async def forecast_for_mode(template_bot, run_mode):
+def select_first_live_binary_question(seasonal, minibench, question_id):
+    """Select exactly one explicitly named, never-forecasted binary question.
+
+    This is an opt-in FIRST-LIVE safety restriction, not eligibility approval.
+    It does not make stale Metaculus history/status authoritative at POST time.
+    """
+    if type(question_id) is not int or question_id <= 0:
+        raise RuntimeError("First-live question ID must be a positive integer")
+    matches = [(label, q) for label, batch in (
+        ("seasonal", seasonal), ("minibench", minibench)
+    ) for q in batch if q.id_of_question == question_id]
+    if len(matches) != 1:
+        raise RuntimeError("First-live question ID not uniquely present in validated inventory")
+    label, question = matches[0]
+    if not isinstance(question, BinaryQuestion) or question.question_type != "binary":
+        raise RuntimeError("First-live mode supports exactly one binary question, not groups/conditionals")
+    if question.already_forecasted is not False:
+        raise RuntimeError("First-live mode refuses any previously forecasted question")
+    if question.id_of_question != question_id:
+        raise RuntimeError("First-live ID changed")
+    return ([question], []) if label == "seasonal" else ([], [question])
+
+
+async def forecast_for_mode(template_bot, run_mode, *, first_live_binary_id=None):
     """One run budget and event loop, including retrieval and both tournaments."""
+    if first_live_binary_id is not None and run_mode != "tournament":
+        raise RuntimeError("First-live binary restriction applies only to tournament mode")
     async with template_bot.run_budget():
         client = MetaculusClient()
         if run_mode == "tournament":
@@ -853,6 +878,12 @@ async def forecast_for_mode(template_bot, run_mode):
             seasonal_questions, minibench_questions = deduplicate_tournaments(
                 seasonal_questions, minibench_questions,
             )
+            if first_live_binary_id is not None:
+                # Never select before BOTH inventories have safely completed.
+                # A missing, ineligible or already forecasted ID fails closed.
+                seasonal_questions, minibench_questions = select_first_live_binary_question(
+                    seasonal_questions, minibench_questions, first_live_binary_id,
+                )
             # Empty authenticated inventories are a safe no-op: do not even
             # initialize the remote publication journal or request model work.
             # Keep the two-phase read-only scan above mandatory in all cases.
@@ -894,8 +925,16 @@ if __name__ == "__main__":
         default="tournament",
         help="What to forecast on (default: tournament)",
     )
+    parser.add_argument(
+        "--first-live-binary-id",
+        type=int,
+        default=None,
+        help="Optional FIRST LIVE guard: publish at most one matching unforecasted binary question",
+    )
     args = parser.parse_args()
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
+    if args.first_live_binary_id is not None and (args.first_live_binary_id <= 0 or run_mode != "tournament"):
+        parser.error("--first-live-binary-id requires a positive ID and --mode tournament")
 
     check_environment(strict=True)
     publish_to_metaculus = True
@@ -934,7 +973,9 @@ predictions_per_research_report=3,
         "test_questions": "https://www.metaculus.com/tournament/bot-testing-area/",
     }
 
-    forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(template_bot, run_mode)))
+    forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(
+        template_bot, run_mode, first_live_binary_id=args.first_live_binary_id,
+    )))
 
     template_bot.log_report_summary(forecast_reports)
     print_run_summary_banner(
