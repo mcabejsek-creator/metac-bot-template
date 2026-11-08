@@ -1,4 +1,4 @@
-"""Strictly offline first-live one-binary-question selection and workflow gates."""
+"""Strictly offline first-live one-atomic-question selection and workflow gates."""
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,7 +8,7 @@ from .support import OfflineTestCase, app, question
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class FirstLiveBinaryGuardTests(OfflineTestCase):
+class FirstLiveAtomicGuardTests(OfflineTestCase):
     def cases(self):
         base = question("japanese_diet")
         return (base.model_copy(update={"id_of_question": 70101, "id_of_post": 90101, "already_forecasted": False}),
@@ -16,8 +16,8 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
 
     def test_exactly_one_selected_without_models_or_network(self):
         a, b = self.cases()
-        self.assertEqual(app.select_first_live_binary_question([a], [b], 90101), ([a], []))
-        self.assertEqual(app.select_first_live_binary_question([a], [b], 90102), ([], [b]))
+        self.assertEqual(app.select_first_live_atomic_question([a], [b], 90101), ([a], []))
+        self.assertEqual(app.select_first_live_atomic_question([a], [b], 90102), ([], [b]))
 
     def test_manual_preflight_can_check_same_candidate_without_logging_its_id(self):
         import json
@@ -42,9 +42,9 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         ):
             with self.subTest(value=value, count=len(first)+len(second)):
                 with self.assertRaises(RuntimeError):
-                    app.select_first_live_binary_question(first, second, value)
+                    app.select_first_live_atomic_question(first, second, value)
 
-    def test_previously_forecasted_or_nonbinary_never_selected(self):
+    def test_previously_forecasted_or_malformed_type_never_selected(self):
         a, _ = self.cases()
         prior = a.model_copy(update={"already_forecasted": True})
         malformed = a.model_copy(update={"already_forecasted": None})
@@ -52,7 +52,57 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         for candidate in (prior, malformed, different_type):
             with self.subTest(candidate=candidate):
                 with self.assertRaises(RuntimeError):
-                    app.select_first_live_binary_question([candidate], [], 90101)
+                    app.select_first_live_atomic_question([candidate], [], 90101)
+
+    def test_all_five_supported_atomic_types_accepted_with_valid_source_metadata(self):
+        # Synthetic post JSON is parsed by the PINNED SDK; no API, models, or POST.
+        from forecasting_tools.data_models.data_organizer import DataOrganizer
+        from .test_forecast_validation import api_post
+        types = ("binary", "multiple_choice", "numeric", "discrete", "date")
+        for index, kind in enumerate(types):
+            with self.subTest(kind=kind):
+                post_id = 93001 + index
+                internal_id = 73001 + index
+                q = DataOrganizer.get_question_from_post_json(
+                    api_post(kind, qid=internal_id, post_id=post_id)
+                )
+                self.assertEqual(q.already_forecasted, False)
+                left, right = app.select_first_live_atomic_question([q], [], post_id)
+                self.assertEqual(left, [q])
+                self.assertEqual(right, [])
+                self.assertEqual(q.id_of_question, internal_id)
+                self.assertEqual(q.id_of_post, post_id)
+
+    def test_unknown_type_and_invalid_question_shape_fail_before_models(self):
+        from forecasting_tools.data_models.data_organizer import DataOrganizer
+        from .test_forecast_validation import api_post
+        from forecasting_tools import ConditionalQuestion
+        original = DataOrganizer.get_question_from_post_json(api_post(
+            "multiple_choice", qid=71020, post_id=91020
+        ))
+        invalid = [
+            original.model_copy(update={"options": ["A", "A", "C"]}),
+            original.model_copy(update={"id_of_question": 0}),
+            original.model_copy(update={"question_type": "conditional"}),
+            original.model_copy(update={"already_forecasted": True}),
+            original.model_copy(update={"already_forecasted": None}),
+        ]
+        for q in invalid:
+            with self.subTest(shape=q):
+                with self.assertRaises(RuntimeError):
+                    app.select_first_live_atomic_question([q], [], 91020)
+        # A conditional pair can result in more than one outbound forecast.
+        # The first-live selector rejects it even with just one post match.
+        from .test_forecast_validation import conditional
+        q = conditional()
+        with self.assertRaises(RuntimeError):
+            app.select_first_live_atomic_question([q], [], 201)
+
+    def test_group_with_two_questions_same_public_post_is_ambiguous(self):
+        a, b = self.cases()
+        b = b.model_copy(update={"id_of_post": a.id_of_post})
+        with self.assertRaisesRegex(RuntimeError, "not uniquely present"):
+            app.select_first_live_atomic_question([a, b], [], a.id_of_post)
 
     async def test_two_scans_finish_before_single_forecast_and_others_untouched(self):
         a, b = self.cases()
