@@ -14,7 +14,7 @@ import re
 POLL_INTERVAL = timedelta(minutes=15)
 STATUS_MAX_AGE = timedelta(minutes=5)
 SPEND_MAX_AGE = timedelta(minutes=5)
-_MONEY = re.compile(r"[0-9]+(?:\\.[0-9]{1,6})?\\Z")
+_MONEY = re.compile(r"[0-9]+(?:\.[0-9]{1,6})?\Z")
 
 
 @dataclass(frozen=True)
