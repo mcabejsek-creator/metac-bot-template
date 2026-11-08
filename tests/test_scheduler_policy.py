@@ -136,7 +136,7 @@ class FutureSchedulerPolicyTests(OfflineTestCase):
         base = accepted().daily_spend
         for field in ("charged_usd", "approved_day_cap_usd",
                       "approved_run_reserve_usd"):
-            for invalid in (None, 1.0, True, "-1", "NaN", "1e2", " 0.01", 
+            for invalid in (None, 1.0, True, "-1", "NaN", "1e2", " 0.01",
                             "0.1234567", ""):
                 with self.subTest(field=field, invalid=invalid):
                     result = evaluate_dispatch(accepted(
@@ -158,7 +158,7 @@ class FutureSchedulerPolicyTests(OfflineTestCase):
         self.assertTrue(result.allowed)
         self.assertFalse(hasattr(result, "dispatch"))
         publisher = (ROOT / ".github/workflows/run_bot_on_tournament.yaml").read_text()
-        self.assertNotIn("\\n  schedule:", publisher)
+        self.assertNotIn("\n  schedule:", publisher)
         self.assertIn("default: DO_NOT_RUN", publisher)
 
     def test_each_approval_and_budget_signal_is_mandatory(self):
