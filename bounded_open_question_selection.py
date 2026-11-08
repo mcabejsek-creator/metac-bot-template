@@ -124,6 +124,13 @@ def _validate_history(post):
         info = leaf.get("my_forecasts")
         if not isinstance(info, dict) or not isinstance(info.get("history"), list):
             raise IncompleteQuestionScan("Missing authoritative own-forecast history")
+        # The pinned SDK defines already_forecasted from history alone. If the
+        # same authenticated API record also advertises a latest forecast,
+        # an empty history is not reliable evidence that this account has
+        # never forecast this question. Refuse to select it for publication.
+        # An absent/latest=None field is compatible with empty history.
+        if not info["history"] and info.get("latest") is not None:
+            raise IncompleteQuestionScan("Inconsistent own-forecast history and latest")
     if conditional_branches is not None:
         # The pinned SDK takes (yes.my_forecasts or no.my_forecasts).
         # A dict with an EMPTY history is truthy. A forecast only on the
