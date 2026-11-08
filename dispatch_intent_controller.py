@@ -251,7 +251,8 @@ def propose_reservation(state, snapshot, *, approval_epoch):
     accumulated = _strict_money(daily.reserved_usd)
     # Never trust a smaller observed charge to erase previous reservations.
     # The stronger of durable reserves and independently observed charges wins.
-    if max(accumulated, charged) + reserve > approved_cap:
+    accounted = max(accumulated, charged)
+    if accounted + reserve > approved_cap:
         return ReservationResult(False, "durable_daily_budget_exhausted", state)
     slot = when.replace(minute=15*(when.minute//15), second=0)
     slot_text = _iso(slot)
@@ -270,7 +271,9 @@ def propose_reservation(state, snapshot, *, approval_epoch):
     )
     new_daily = replace(
         daily, attempts=daily.attempts + 1,
-        reserved_usd=format(accumulated + reserve, "f"),
+        # Persist the same conservative floor used for admission. Otherwise a
+        # later lower provider reading could erase previously observed charges.
+        reserved_usd=format(accounted + reserve, "f"),
     )
     new_state = replace(
         state, last_intent_at=stamp, last_slot=slot_text, pending=intent,
