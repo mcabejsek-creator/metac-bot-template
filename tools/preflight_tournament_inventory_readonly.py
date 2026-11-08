@@ -48,9 +48,9 @@ class RequestBudget:
 def _summary(questions, now):
     unforecasted = [question for question in questions if question.already_forecasted is False]
     return {
-        "eligible_open_questions": len(questions),
-        "already_forecasted": len(questions) - len(unforecasted),
-        "not_previously_forecasted": len(unforecasted),
+        "open_with_valid_timing_and_history": len(questions),
+        "previously_forecasted_in_token_history": len(questions) - len(unforecasted),
+        "no_forecast_in_token_history": len(unforecasted),
         "unforecasted_closing_within_24_hours": sum(
             0 <= (effective_close(question) - now).total_seconds() <= 86400
             for question in unforecasted
@@ -69,6 +69,7 @@ def inspect(client, read_page, *, now=None):
         "mode": "strictly_read_only_manual_preflight",
         "snapshot_utc": timestamp.isoformat(),
         "completed_both_inventories": True,
+        "tournament_participation_eligibility_verified": False,
         "authenticated_get_attempts": budget.calls,
         "maximum_get_attempts": MAX_TOTAL_GETS,
         "model_calls": 0,
@@ -81,7 +82,8 @@ def inspect(client, read_page, *, now=None):
             "MiniBench": _summary(second, timestamp),
         },
         "limitations": (
-            "Eligibility is evaluated from the authenticated GET snapshot only. "
+            "Only open status, validated timing and authenticated token history are checked; "
+            "tournament participation and publishing eligibility are NOT established. "
             "Questions may open, close, or change history after this snapshot. "
             "No actual model/publication/checkpoint end-to-end validation is performed."
         ),
@@ -137,13 +139,45 @@ def self_check():
     assert len(reads) == 6
     a = report["competition_counts"]["Fall FutureEval 2026"]
     b = report["competition_counts"]["MiniBench"]
-    assert (a["eligible_open_questions"], a["already_forecasted"],
-            a["not_previously_forecasted"], a["unforecasted_closing_within_24_hours"]) == (2, 1, 1, 1)
-    assert (b["eligible_open_questions"], b["already_forecasted"],
-            b["not_previously_forecasted"]) == (1, 0, 1)
+    assert (a["open_with_valid_timing_and_history"], a["previously_forecasted_in_token_history"],
+            a["no_forecast_in_token_history"], a["unforecasted_closing_within_24_hours"]) == (2, 1, 1, 1)
+    assert (b["open_with_valid_timing_and_history"], b["previously_forecasted_in_token_history"],
+            b["no_forecast_in_token_history"]) == (1, 0, 1)
     serialized = json.dumps(report)
     assert "synthetic" not in serialized and '"111"' not in serialized
     assert '"112"' not in serialized and '"113"' not in serialized
+    assert report["tournament_participation_eligibility_verified"] is False
+
+    # A failure while scanning the SECOND competition must not emit a partial
+    # successful inventory, and no extra network attempt may be retried.
+    calls_on_failure = []
+    def broken_second(tournament, offset):
+        calls_on_failure.append((tournament, offset))
+        if tournament == MINIBENCH:
+            raise IncompleteQuestionScan("Synthetic second-project failure")
+        return pattern[(tournament, offset)]
+    try:
+        inspect(FakeClient(), broken_second, now=now)
+    except IncompleteQuestionScan:
+        pass
+    else:
+        raise AssertionError("Incomplete second inventory was treated as success")
+    assert calls_on_failure == [
+        (FUTUREEVAL, 0), (FUTUREEVAL, 100), (FUTUREEVAL, 200),
+        (MINIBENCH, 0),
+    ]
+
+    # Enforce one global 10-GET cap in a purely in-memory transport.
+    bounded = RequestBudget(lambda *_: ([], True))
+    for index in range(MAX_TOTAL_GETS):
+        bounded(FUTUREEVAL, index * 100)
+    try:
+        bounded(FUTUREEVAL, MAX_TOTAL_GETS * 100)
+    except IncompleteQuestionScan:
+        pass
+    else:
+        raise AssertionError("Request budget allowed an 11th GET")
+    assert bounded.calls == MAX_TOTAL_GETS
     print("Offline manual-preflight self-check passed; no network, no secrets, no model or POST", flush=True)
 
 
