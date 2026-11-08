@@ -21,7 +21,34 @@ from github_publication import (
 )
 
 MAX_RESOURCES = 100
+MAX_GITHUB_GETS = 2 + 2 * MAX_RESOURCES
 STATES = ("ready", "sending", "confirmed", "rejected", "uncertain")
+
+
+class GetOnlyBoundedSession:
+    """Enforce the operator-approved GET budget on every GitHub HTTP attempt.
+
+    Shard-specific GitHubContents instances share this one session and budget.
+    No PUT, POST, redirects, other hosts, or non-state-branch reads are allowed.
+    """
+
+    def __init__(self, transport, contents):
+        self.transport = transport
+        self.calls = 0
+        self.branch = contents.branch
+        self.root_url = contents.url
+
+    def request(self, method, url, **kwargs):
+        if (method != "GET" or
+                not isinstance(url, str) or
+                not (url == self.root_url or url.startswith(self.root_url + ".d/")) or
+                kwargs.get("params") != {"ref": self.branch} or
+                kwargs.get("allow_redirects") is not False):
+            raise GitHubStateError("Read-only audit refused an unsafe network request")
+        if self.calls >= MAX_GITHUB_GETS:
+            raise GitHubStateError("Read-only audit exhausted 202 GitHub GET attempts")
+        self.calls += 1  # count attempts, including failed HTTP requests
+        return self.transport.request(method, url, **kwargs)
 
 
 def _count_shard(blob):
@@ -177,6 +204,37 @@ def self_check():
     assert "test-report" not in public and "test text" not in public
     assert "1234" not in public and "4567" not in public
 
+    # Test the same HTTP boundary used by the live audit without any network.
+    from unittest.mock import Mock
+    transport = Mock()
+    contents = new_store().contents
+    gate = GetOnlyBoundedSession(transport, contents)
+    legal_kwargs = {"params": {"ref": BRANCH}, "allow_redirects": False}
+    for forbidden_method, forbidden_url, forbidden_kwargs in (
+        ("POST", contents.url, legal_kwargs),
+        ("PUT", contents.url, legal_kwargs),
+        ("GET", "https://www.metaculus.com/api/posts/", legal_kwargs),
+        ("GET", contents.url, {"params": {"ref": "main"}, "allow_redirects": False}),
+        ("GET", contents.url, {"params": {"ref": BRANCH}, "allow_redirects": True}),
+    ):
+        try:
+            gate.request(forbidden_method, forbidden_url, **forbidden_kwargs)
+        except GitHubStateError:
+            pass
+        else:
+            raise AssertionError("Read-only HTTP boundary accepted unsafe request")
+    assert gate.calls == 0 and transport.request.call_count == 0
+    for _ in range(MAX_GITHUB_GETS):
+        gate.request("GET", contents.url, **legal_kwargs)
+    assert gate.calls == MAX_GITHUB_GETS
+    try:
+        gate.request("GET", contents.url, **legal_kwargs)
+    except GitHubStateError:
+        pass
+    else:
+        raise AssertionError("Audit permitted a 203rd GitHub GET")
+    assert transport.request.call_count == MAX_GITHUB_GETS
+
     # A torn read fails closed rather than reporting a misleading safe result.
     fake.stale_reads = []  # The fake does not serve stale root manifests.
     fake.status = 403
@@ -207,7 +265,12 @@ def main():
         print("Journal audit refused: credentials missing", file=sys.stderr)
         sys.exit(2)
     try:
-        report = audit_store(configured_store())
+        store = configured_store()
+        bounded_session = GetOnlyBoundedSession(store.contents.session, store.contents)
+        store.contents.session = bounded_session
+        report = audit_store(store)
+        report["github_get_attempts"] = bounded_session.calls
+        report["maximum_github_get_attempts"] = MAX_GITHUB_GETS
         print(json.dumps(report, sort_keys=True), flush=True)
     except Exception:
         # Never echo API responses, hashed resources, decrypted data or secrets.
