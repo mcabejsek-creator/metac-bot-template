@@ -171,6 +171,54 @@ class ScanTests(unittest.TestCase):
             scan_open_tournament(FakeClient(), 33121,
                                  read_page=lambda *_: ([p], False), now=NOW)
 
+    def test_latest_forecast_with_empty_history_fails_closed(self):
+        # Pinned SDK checks only 'history', while authenticated 'latest'
+        # can independently indicate this account has already forecast.
+        # Never permit a duplicate merely because history is incomplete.
+        for typ in ("question", "group"):
+            with self.subTest(typ=typ):
+                p = post(72, typ=typ)
+                leaf = (p["question"] if typ == "question"
+                        else p["group_of_questions"]["questions"][0])
+                leaf["my_forecasts"] = {
+                    "history": [], "latest": {"start_time": 1234}
+                }
+                with self.assertRaisesRegex(IncompleteQuestionScan, "Inconsistent"):
+                    scan_open_tournament(
+                        FakeClient(), 33121,
+                        read_page=lambda *_: ([p], False), now=NOW,
+                    )
+
+    def test_explicit_null_latest_with_empty_history_remains_valid(self):
+        p = post(73)
+        p["question"]["my_forecasts"]["latest"] = None
+        selected = scan_open_tournament(
+            FakeClient(), 33121,
+            read_page=lambda *_: ([p], False), now=NOW,
+        )
+        self.assertEqual([q.id_of_question for q in selected], [73])
+
+    def test_conditional_latest_forecast_with_empty_branch_history_fails_closed(self):
+        def leaf(ident):
+            return {"id": ident, "status": "open",
+                    "my_forecasts": {"history": [], "latest": None}}
+        p = {
+            "id": 700,
+            "conditional": {
+                "condition": leaf(701), "condition_child": leaf(702),
+                "question_yes": leaf(703), "question_no": leaf(704),
+            },
+            "_synthetic_questions": [question(700)],
+        }
+        p["conditional"]["question_no"]["my_forecasts"]["latest"] = {
+            "start_time": 1234
+        }
+        with self.assertRaisesRegex(IncompleteQuestionScan, "Inconsistent"):
+            scan_open_tournament(
+                FakeClient(), 33121,
+                read_page=lambda *_: ([p], False), now=NOW,
+            )
+
     def test_phantom_next_terminates_after_two_empty_pages(self):
         # Django CountlessLimitOffsetPagination uses infinite 'count', so
         # 'next' stays populated after the last available post.
