@@ -41,9 +41,9 @@ class LivePublishingApprovalGuards(unittest.TestCase):
         # publishing gate must compare against the exact visible "YES".
         source = (ROOT / ".github" / "workflows" / PUBLISHERS[0]).read_text()
         self.assertIn('      perplexity_auto_recharge_off:', source)
-        self.assertIn('        default: "NO"\\n', source)
-        self.assertIn('          - "NO"\\n', source)
-        self.assertIn('          - "YES"\\n', source)
+        self.assertIn('        default: "NO"\n', source)
+        self.assertIn('          - "NO"\n', source)
+        self.assertIn('          - "YES"\n', source)
         self.assertIn("inputs.perplexity_auto_recharge_off == 'YES'", source)
 
     def test_stale_external_cron_payload_cannot_authorize_publishing(self):
