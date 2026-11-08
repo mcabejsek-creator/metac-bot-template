@@ -1,0 +1,49 @@
+# Human-triggered GitHub Actions queue GETs only. No cron, LLM or forecasts.
+# Both workflow input AND script-level environment approval are mandatory.
+name: Vrchcab manual publisher queue check (GitHub GET only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Authorize at most 5 GitHub Actions GETs, no publishing"
+        type: choice
+        required: true
+        default: DO_NOT_RUN
+        options:
+          - DO_NOT_RUN
+          - YES_READ_ONLY_GITHUB_QUEUE
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: vrchcab-manual-github-queue-status-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  queue_check:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirmation == 'YES_READ_ONLY_GITHUB_QUEUE' &&
+      github.run_attempt == 1
+    timeout-minutes: 4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax-check GET-only queue modules
+        run: python -B -m py_compile github_publisher_queue_readonly.py tools/diagnose_github_queue_readonly.py
+      - name: Five allowlisted GitHub GETs; report only
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VRCHCAB_GITHUB_QUEUE_READ_APPROVAL: ${{ inputs.confirmation }}
+          METACULUS_TOKEN: ''
+          PERPLEXITY_API_KEY: ''
+          OPENROUTER_API_KEY: ''
+        run: python -B tools/diagnose_github_queue_readonly.py --check-approved-readonly

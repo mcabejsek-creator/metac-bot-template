@@ -1,6 +1,8 @@
 """Bounded authenticated GET-only evidence for GitHub publisher queue states.
 
 NO GitHub workflows dispatch, no POST/PUT, no Metaculus, no paid models.
+Count ALL publishing workflow paths (tournament, Cup, Test Bot, future worker),
+not merely the known historic tournament workflow ID.
 Unreliable/incomplete repository-run information always fails closed.
 The September 2026 stuck queued publishing run is intentionally NOT excluded.
 A read-only snapshot is not an atomic dispatch lock: use the existing
@@ -18,7 +20,15 @@ import urllib.request
 
 REPO = "mcabejsek-creator/metac-bot-template"
 API_ROOT = f"https://api.github.com/repos/{REPO}"
+# The historical tournament workflow ID is retained so a renamed/deleted
+# old workflow cannot conceal its still-queued run.
 PUBLISHING_WORKFLOW_ID = 347996133
+PUBLISHING_WORKFLOW_PATHS = frozenset({
+    ".github/workflows/run_bot_on_tournament.yaml",
+    ".github/workflows/run_bot_on_metaculus_cup.yaml",
+    ".github/workflows/test_bot.yaml",
+    ".github/workflows/autonomous_one_worker.yaml",  # FUTURE ONLY, no file exists
+})
 KNOWN_STUCK_RUN_ID = 34463156990
 SCANNED_STATES = ("in_progress", "queued", "requested", "waiting", "pending")
 MAX_RUNS_PER_STATE = 100
@@ -123,13 +133,19 @@ class GitHubPublisherQueueReader:
                 ident = run.get("id")
                 workflow = run.get("workflow_id")
                 state = run.get("status")
+                path = run.get("path")
                 if (type(ident) is not int or ident <= 0
                         or type(workflow) is not int or workflow <= 0
                         or not isinstance(state, str) or state != requested_status
+                        or not isinstance(path, str)
+                        or not path.startswith(".github/workflows/")
                         or ident in counted):
                     raise GitHubRunEvidenceUnavailable("Conflicting GitHub run snapshot")
                 counted.add(ident)
-                if workflow == PUBLISHING_WORKFLOW_ID:
+                # Cup and Test Bot also publish and share the same encrypted
+                # journal + concurrency lock. A new worker has no fixed
+                # workflow ID yet, so recognize its explicit future path.
+                if workflow == PUBLISHING_WORKFLOW_ID or path in PUBLISHING_WORKFLOW_PATHS:
                     if requested_status == "in_progress":
                         active.add(ident)
                     else:
