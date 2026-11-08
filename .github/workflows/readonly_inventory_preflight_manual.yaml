@@ -17,6 +17,11 @@ on:
         options:
           - "DO_NOT_RUN"
           - "YES_READ_ONLY_MAX_TEN_GETS"
+      candidate_question_id:
+        description: "Optional public question ID to verify in the bounded snapshot; not logged"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +69,7 @@ jobs:
     env:
       METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
       VRCHCAB_READONLY_PREFLIGHT_APPROVED: "YES_READ_ONLY_MAX_TEN_GETS"
+      VRCHCAB_CANDIDATE_QUESTION_ID: ${{ inputs.candidate_question_id }}
       PERPLEXITY_API_KEY: ""
       OPENROUTER_API_KEY: ""
       OPENAI_API_KEY: ""
