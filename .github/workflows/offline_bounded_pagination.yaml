@@ -11,6 +11,7 @@ on:
       - "tests/test_runtime_limits.py"
       - "tests/test_github_publication.py"
       - "tools/preflight_tournament_inventory_readonly.py"
+      - "tools/audit_publication_journal_readonly.py"
       - ".github/workflows/readonly_inventory_preflight_manual.yaml"
       - "docs/vrchcab_bounded_pagination_review_20261107.md"
       - ".github/workflows/offline_bounded_pagination.yaml"
@@ -47,11 +48,13 @@ jobs:
       - name: Install locked dependencies without executing bot
         run: poetry install --no-interaction --no-root
       - name: Static syntax and source checks
-        run: poetry run python -B -m py_compile main.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tests/test_bounded_open_question_selection.py
+        run: poetry run python -B -m py_compile main.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tools/audit_publication_journal_readonly.py tests/test_bounded_open_question_selection.py
       - name: Synthetic regression tests with socket-level network guard
         run: poetry run python -B -m tests.test_bounded_open_question_selection
       - name: Manual-preflight logic self-check (synthetic only; no credentials)
         run: poetry run python -B tools/preflight_tournament_inventory_readonly.py --self-check
+      - name: Authenticated journal audit offline self-check (synthetic only)
+        run: poetry run python -B tools/audit_publication_journal_readonly.py --self-check
       - name: Existing publisher and forecasting offline regressions
         env:
           METACULUS_PUBLICATION_BACKEND: github
