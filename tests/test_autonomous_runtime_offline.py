@@ -6,6 +6,7 @@ audit guard and fails even on a caught network attempt. No main.py import,
 credentials, real journal, workflow dispatch, provider or Metaculus access.
 """
 
+import ast
 import io
 import json
 import sys
@@ -37,14 +38,16 @@ if __name__ == "__main__":
 from autonomous_orchestrator import (
     AutonomousPreflightRejected, IndependentReadings, KillSwitchUncertain,
     OutcomeEvidence, assess_settlement, evaluate_offline_tick,
-    persist_emergency_stop, reserve_only_after_preflight,
+    persist_emergency_stop, reserve_only_after_preflight, evaluate_offline_worker_handoff,
 )
 from dispatch_intent_controller import ControllerState, DailyQuota
 from github_publisher_queue_readonly import (
     GitHubPublisherQueueReader, KNOWN_STUCK_RUN_ID, PUBLISHING_WORKFLOW_ID,
 )
 from github_queue_preflight import GitHubQueuePreflightSource
-from perplexity_run_budget import PerplexityAutoRunBudget, PerplexityBudgetUnavailable
+from perplexity_run_budget import (
+    PerplexityAutoRunBudget, PerplexityBudgetUnavailable, MAX_AUTO_AGENT_POST_ATTEMPTS,
+)
 from publication_journal import PublicationStore, PublicationUncertain, Publisher
 from scheduler_policy import DailySpendEvidence
 
@@ -124,6 +127,268 @@ def budget():
 
 
 class AutonomousRuntimeOfflineTests(unittest.TestCase):
+    @staticmethod
+    def handoff_fixture():
+        control = MemoryControl()
+        intent = reserve(control).intent_id
+        source = SyntheticSource()
+        source.readings = replace(source.readings, daily_spend=replace(
+            source.readings.daily_spend,
+            attempted_dispatches=control.state.daily_quota.attempts,
+            max_daily_dispatches=control.state.daily_quota.attempts,
+        ))
+        arguments = dict(
+            now=NOW, intent_id=intent, approval_epoch=3,
+            activation_confirmed=True, researcher="perplexity-agent",
+            research_reports_per_question=1,  # unverified claim, NOT main's 2
+        )
+        return control, source, arguments
+
+    def test_worker_handoff_defaults_to_off_without_any_reader(self):
+        for activation in (False, None, "true", 1):
+            with self.subTest(activation=activation):
+                result = evaluate_offline_worker_handoff(
+                    object(), object(), now=NOW, activation_confirmed=activation,
+                )
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, "worker_activation_not_confirmed")
+
+    def test_worker_handoff_disabled_controller_never_reads_provider(self):
+        control, source, arguments = self.handoff_fixture()
+        control.state = replace(control.state, enabled=False)
+        result = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "persistent_kill_switch_disabled")
+        self.assertEqual(source.calls, 0)
+        self.assertEqual(control.writes, 1)  # only the prior synthetic reservation
+
+    def test_worker_handoff_requires_the_exact_reserved_intent_and_epoch(self):
+        for changes, reason in (
+            ({"intent_id": None}, "worker_intent_mismatch"),
+            ({"intent_id": "unrelated"}, "worker_intent_mismatch"),
+            ({"approval_epoch": 4}, "approval_generation_mismatch"),
+            ({"approval_epoch": True}, "approval_generation_mismatch"),
+        ):
+            with self.subTest(changes=changes):
+                control, source, arguments = self.handoff_fixture()
+                result = evaluate_offline_worker_handoff(control, source, **{**arguments, **changes})
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, reason)
+                self.assertEqual(source.calls, 0)
+        control, source, arguments = self.handoff_fixture()
+        control.state = replace(control.state, pending=None)
+        result = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertEqual(result.reason, "worker_intent_not_reserved")
+        self.assertEqual(source.calls, 0)
+
+    def test_worker_handoff_rechecks_queue_including_legacy_queued_publisher(self):
+        control, source, arguments = self.handoff_fixture()
+        # The real queue reader's existing synthetic test below establishes
+        # that #34463156990 is included. No exemption is made at handoff.
+        source.readings = replace(source.readings, queued_publishers=1)
+        before = control.state.encode()
+        with self.assertRaises(AutonomousPreflightRejected):
+            evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertEqual(control.state.encode(), before)
+        self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_uncertain_publication_or_unverified_cost_denies(self):
+        for field in (
+            "prior_publication_certain", "perplexity_spend_ok",
+            "operator_approval_confirmed", "automation_switch_confirmed",
+            "funded_openrouter_ok", "is_first_attempt",
+        ):
+            with self.subTest(field=field):
+                control, source, arguments = self.handoff_fixture()
+                source.readings = replace(source.readings, **{field: False})
+                with self.assertRaises(AutonomousPreflightRejected):
+                    evaluate_offline_worker_handoff(control, source, **arguments)
+                self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_requires_complete_matching_reserved_daily_quota(self):
+        for changes in (
+            {"complete": False}, {"attempted_dispatches": 1},
+            {"attempted_dispatches": True}, {"max_daily_dispatches": 1},
+            {"day_utc": NOW.date() - timedelta(days=1)},
+        ):
+            with self.subTest(changes=changes):
+                control, source, arguments = self.handoff_fixture()
+                source.readings = replace(source.readings, daily_spend=replace(
+                    source.readings.daily_spend, **changes,
+                ))
+                result = evaluate_offline_worker_handoff(control, source, **arguments)
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, "worker_reserved_daily_quota_unverified")
+                self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_does_not_assume_unknown_or_new_charges_are_zero(self):
+        for changes in (
+            {"charged_usd": None}, {"charged_usd": "NaN"},
+            {"charged_usd": "0.70"},  # 0.70 + 0.40 exceeds the 1.00 day cap
+            {"approved_day_cap_usd": "0.50"},
+            {"approved_run_reserve_usd": "0.90"},
+        ):
+            with self.subTest(changes=changes):
+                control, source, arguments = self.handoff_fixture()
+                source.readings = replace(source.readings, daily_spend=replace(
+                    source.readings.daily_spend, **changes,
+                ))
+                result = evaluate_offline_worker_handoff(control, source, **arguments)
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, "worker_reserved_daily_budget_unverified")
+                self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_last_reserved_slot_still_requires_bound_config(self):
+        control, source, arguments = self.handoff_fixture()
+        before = control.state.encode()
+        result = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "worker_research_plan_not_bound_to_configuration")
+        self.assertEqual(result.intent_id, control.state.pending.intent_id)
+        self.assertFalse(result.durably_reserved)
+        self.assertEqual(control.state.encode(), before)
+        self.assertEqual(control.writes, 1)
+        # Repeating an unbound preview cannot create worker authorization.
+        repeated = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertFalse(repeated.allowed)
+        self.assertEqual(repeated.reason, "worker_research_plan_not_bound_to_configuration")
+        self.assertEqual(control.writes, 1)
+        self.assertIsNotNone(control.state.pending)
+
+    def test_worker_handoff_rejects_stale_or_pre_reservation_evidence(self):
+        for stamp in (None, NOW - timedelta(minutes=6), NOW + timedelta(seconds=1)):
+            with self.subTest(stamp=stamp):
+                control, source, arguments = self.handoff_fixture()
+                source.readings = replace(source.readings, journal_checked_at=stamp)
+                with self.assertRaises(AutonomousPreflightRejected):
+                    evaluate_offline_worker_handoff(control, source, **arguments)
+        control, source, arguments = self.handoff_fixture()
+        source.readings = replace(source.readings, github_checked_at=NOW - timedelta(seconds=1))
+        result = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertEqual(result.reason, "worker_sources_predate_intent")
+        self.assertFalse(result.allowed)
+
+    def test_worker_handoff_expires_without_clearing_pending(self):
+        control, source, arguments = self.handoff_fixture()
+        boundary = evaluate_offline_worker_handoff(
+            control, source, **{**arguments, "now": NOW + timedelta(minutes=5)},
+        )
+        self.assertFalse(boundary.allowed)
+        self.assertEqual(boundary.reason, "worker_research_plan_not_bound_to_configuration")
+        for instant in (NOW - timedelta(seconds=1), NOW + timedelta(minutes=5, seconds=1)):
+            with self.subTest(instant=instant):
+                control, source, arguments = self.handoff_fixture()
+                result = evaluate_offline_worker_handoff(
+                    control, source, **{**arguments, "now": instant},
+                )
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, "worker_intent_expired_or_future")
+                self.assertEqual(source.calls, 0)
+                self.assertIsNotNone(control.state.pending)
+
+    def test_worker_handoff_rereads_kill_switch_after_source_checks(self):
+        control, source, arguments = self.handoff_fixture()
+
+        class RacingSource:
+            def read(self):
+                control.state = replace(control.state, enabled=False)
+                control.revision += 1
+                return source.read()
+
+        result = evaluate_offline_worker_handoff(control, RacingSource(), **arguments)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "worker_control_state_changed_during_preflight")
+        self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_evaluates_evidence_after_reads_and_rechecks_clock(self):
+        control, source, arguments = self.handoff_fixture()
+        finish = NOW + timedelta(seconds=30)
+        source.readings = replace(source.readings, **{
+            field: finish for field in (
+                "github_checked_at", "funded_openrouter_checked_at",
+                "perplexity_checked_at", "journal_checked_at",
+            )
+        }, daily_spend=replace(source.readings.daily_spend, checked_at=finish))
+        clock = iter((NOW, finish))
+        result = evaluate_offline_worker_handoff(
+            control, source, **{**arguments, "now": lambda: next(clock)},
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "worker_research_plan_not_bound_to_configuration")
+        for finish, reason in (
+            (NOW + timedelta(minutes=6), "worker_intent_expired_or_future"),
+            (NOW - timedelta(seconds=1), "worker_clock_moved_backwards"),
+        ):
+            with self.subTest(finish=finish):
+                control, source, arguments = self.handoff_fixture()
+                clock = iter((NOW, finish))
+                result = evaluate_offline_worker_handoff(
+                    control, source, **{**arguments, "now": lambda: next(clock)},
+                )
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, reason)
+                self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_refuses_missing_research_plan_and_quality_bypass(self):
+        for changes in (
+            {"research_reports_per_question": None},
+            {"research_reports_per_question": True},
+            {"research_reports_per_question": 0},
+            {"researcher": "no_research"},
+        ):
+            with self.subTest(changes=changes):
+                control, source, arguments = self.handoff_fixture()
+                result = evaluate_offline_worker_handoff(control, source, **{**arguments, **changes})
+                self.assertFalse(result.allowed)
+                self.assertEqual(result.reason, "worker_research_plan_unverified")
+                self.assertEqual(source.calls, 0)
+
+    def test_worker_handoff_rejects_actual_main_research_contract_before_readers(self):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "main.py").read_text())
+        constructors = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name) and node.func.id == "SummerTemplateBot2026"]
+        self.assertEqual(len(constructors), 1)
+        reports = next(keyword.value.value for keyword in constructors[0].keywords
+                       if keyword.arg == "research_reports_per_question")
+        phases = [next(keyword.value.value for keyword in node.keywords if keyword.arg == "phase")
+                  for node in ast.walk(tree) if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name) and node.func.id == "agent_research"]
+        self.assertEqual(sorted(phases), ["fact-check", "initial"])
+        self.assertEqual(reports, 2)
+        self.assertEqual(MAX_AUTO_AGENT_POST_ATTEMPTS, 2)
+        self.assertEqual(reports * len(phases), 4)
+        control, source, arguments = self.handoff_fixture()
+        result = evaluate_offline_worker_handoff(
+            control, source, **{**arguments, "research_reports_per_question": reports},
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "worker_research_plan_exceeds_automatic_attempt_cap")
+        self.assertEqual(source.calls, 0)
+        self.assertEqual(control.writes, 1)
+
+    def test_worker_handoff_forged_one_report_cannot_override_actual_worker(self):
+        tree = ast.parse((Path(__file__).resolve().parents[1] / "main.py").read_text())
+        constructor = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                           and isinstance(node.func, ast.Name)
+                           and node.func.id == "SummerTemplateBot2026")
+        actual_reports = next(keyword.value.value for keyword in constructor.keywords
+                              if keyword.arg == "research_reports_per_question")
+        phases = [next(keyword.value.value for keyword in node.keywords if keyword.arg == "phase")
+                  for node in ast.walk(tree) if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name) and node.func.id == "agent_research"]
+        self.assertEqual(actual_reports, 2)
+        self.assertEqual(sorted(phases), ["fact-check", "initial"])
+        self.assertEqual(actual_reports * len(phases), 4)
+        self.assertEqual(MAX_AUTO_AGENT_POST_ATTEMPTS, 2)
+        control, source, arguments = self.handoff_fixture()
+        self.assertEqual(arguments["research_reports_per_question"], 1)  # forged caller claim
+        before = control.state.encode()
+        result = evaluate_offline_worker_handoff(control, source, **arguments)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, "worker_research_plan_not_bound_to_configuration")
+        self.assertEqual(control.state.encode(), before)
+        self.assertEqual(control.writes, 1)
+
     def test_disabled_controller_and_preview_never_write(self):
         source = SyntheticSource()
         disabled = MemoryControl(ControllerState())
