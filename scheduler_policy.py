@@ -112,6 +112,10 @@ def evaluate_dispatch(snapshot: DispatchSnapshot) -> DispatchDecision:
         return DispatchDecision(False, "verified_daily_spend_unavailable")
     if type(budget.day_utc) is not date or budget.day_utc != now.date():
         return DispatchDecision(False, "daily_spend_day_mismatch")
+    if (not isinstance(budget.checked_at, datetime)
+            or budget.checked_at.tzinfo is None
+            or budget.checked_at.utcoffset() is None):
+        return DispatchDecision(False, "daily_spend_snapshot_invalid")
     confirmed_at = _utc_time(budget.checked_at)
     if not timedelta(0) <= now - confirmed_at <= SPEND_MAX_AGE:
         return DispatchDecision(False, "daily_spend_snapshot_stale")
