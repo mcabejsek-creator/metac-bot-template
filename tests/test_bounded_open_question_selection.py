@@ -436,6 +436,7 @@ class ReadTransportTests(unittest.TestCase):
             self.assertEqual(params["tournaments"], [tournament])
             self.assertEqual(params["offset"], [str(offset)])
             self.assertEqual(params["statuses"], ["open"])
+            self.assertEqual(params["order_by"], ["-published_at"])
             self.assertEqual(params["limit"], ["100"])
             self.assertNotIn("forecast_type", params)
 

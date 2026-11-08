@@ -47,7 +47,7 @@ def make_request(project, token):
     params = [
         ("limit", str(FIRST_PAGE_LIMIT)),
         ("offset", "0"),
-        ("order_by", "-published_time"),
+        ("order_by", "-published_at"),
         ("with_cp", "true"),
         ("include_conditional_cps", "true"),
         ("statuses", "open"),
@@ -154,6 +154,7 @@ def self_check():
         assert (u.scheme, u.netloc, u.path) == ("https", HOST, API_PATH)
         assert q["tournaments"] == [project]
         assert q["statuses"] == ["open"]
+        assert q["order_by"] == ["-published_at"]
         assert q["offset"] == ["0"] and q["limit"] == [str(FIRST_PAGE_LIMIT)]
         assert "forecast_type" not in q
         assert r.get_method() == "GET"

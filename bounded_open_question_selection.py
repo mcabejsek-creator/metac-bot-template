@@ -58,7 +58,7 @@ class BoundedPostReader:
         self._previous_start = self._clock()
         params = urllib.parse.urlencode((
             ("limit", str(PAGE_SIZE)), ("offset", str(offset)),
-            ("order_by", "-published_time"), ("with_cp", "true"),
+            ("order_by", "-published_at"), ("with_cp", "true"),
             ("include_conditional_cps", "true"), ("statuses", "open"),
             ("tournaments", str(tournament)),
         ))
