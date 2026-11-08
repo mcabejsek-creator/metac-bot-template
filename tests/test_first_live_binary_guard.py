@@ -26,6 +26,8 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         ready = _candidate_check([a], [b], 90101)
         self.assertTrue(ready["present_once_in_validated_open_inventory"])
         self.assertTrue(ready["binary_with_empty_token_forecast_history_in_snapshot"])
+        self.assertEqual(ready["observed_question_type"], "binary")
+        self.assertTrue(ready["single_supported_atomic_unforecasted_in_token_snapshot"])
         self.assertFalse(ready["historical_outcomes_fully_reconciled"])
         self.assertFalse(ready["live_publication_authorized"])
         self.assertNotIn("90101", json.dumps(ready))
@@ -72,6 +74,11 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
                 self.assertEqual(right, [])
                 self.assertEqual(q.id_of_question, internal_id)
                 self.assertEqual(q.id_of_post, post_id)
+                from tools.preflight_tournament_inventory_readonly import _candidate_check
+                status = _candidate_check([q], [], post_id)
+                self.assertEqual(status["observed_question_type"], kind)
+                self.assertTrue(status["single_supported_atomic_unforecasted_in_token_snapshot"])
+                self.assertFalse(status["live_publication_authorized"])
 
     def test_unknown_type_and_invalid_question_shape_fail_before_models(self):
         from forecasting_tools.data_models.data_organizer import DataOrganizer
