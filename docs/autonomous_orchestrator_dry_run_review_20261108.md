@@ -12,6 +12,9 @@ A single, testable program module now composes the previously separate safeguard
    workflows, Metaculus-donated OpenRouter credit balance, Perplexity
    spending authorization, and encrypted publication journal status.
    Missing, stale, future, unknown or contradictory evidence fails closed.
+   Mismatched authorization generations are denied before contacting
+   any provider. Controller reservation timestamps must be canonical UTC
+   whole seconds (subsecond timestamps fail closed).
    In a *real deployment*, readers MUST authenticate each source; a Python
    boolean or synthetic fixture is not itself independent evidence.
 3. Reuse the PR #14 `scheduler_policy` (15-minute spacing, no overlaps)
@@ -30,8 +33,10 @@ A single, testable program module now composes the previously separate safeguard
    eligibility if the same intent is tied to a successful future
    `autonomous_one_worker.yaml` run and the same public post ID appears in
    the worker's final report, confirmed encrypted publication journal
-   and Metaculus forecast history. Four independently fresh completion,
-   journal, history, and billing checks are mandatory. A green Actions
+   and Metaculus forecast history. The journal, history and billing
+   checks must occur at or after GitHub workflow completion.
+   Four independently fresh completion, journal, history, and billing
+   checks are mandatory. A green Actions
    status alone is NOT enough. Pending state is **never cleared here**.
    Zero-candidate, failure, unknown/cancelled, or no-POST results currently
    remain blocked until separately reviewed verified no-publication
