@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - "main.py"
+      - "automatic_one_selection.py"
+      - "tests/test_automatic_one_selection.py"
       - "bounded_open_question_selection.py"
       - "tests/test_bounded_open_question_selection.py"
       - "tests/test_runtime_limits.py"
@@ -52,9 +54,9 @@ jobs:
       - name: Install locked dependencies without executing bot
         run: poetry install --no-interaction --no-root
       - name: Static syntax and source checks
-        run: poetry run python -B -m py_compile main.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tools/audit_publication_journal_readonly.py tests/test_bounded_open_question_selection.py
+        run: poetry run python -B -m py_compile main.py automatic_one_selection.py tests/test_automatic_one_selection.py bounded_open_question_selection.py tools/preflight_tournament_inventory_readonly.py tools/audit_publication_journal_readonly.py tests/test_bounded_open_question_selection.py
       - name: Synthetic regression tests with socket-level network guard
-        run: poetry run python -B -m tests.test_bounded_open_question_selection
+        run: poetry run python -B -m unittest tests.test_bounded_open_question_selection tests.test_automatic_one_selection
       - name: Manual-preflight logic self-check (synthetic only; no credentials)
         run: poetry run python -B tools/preflight_tournament_inventory_readonly.py --self-check
       - name: Authenticated journal audit offline self-check (synthetic only)
