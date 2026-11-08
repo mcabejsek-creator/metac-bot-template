@@ -41,6 +41,7 @@ from forecasting_tools import (
 )
 
 from forecasting_tools.data_models.questions import DiscreteQuestion
+from automatic_one_selection import select_one_automatic_candidate
 from publication import SafePublicationMixin
 from runtime_limits import RuntimeLimitsMixin, cancellable_cli
 from research_safety import agent_research, validate_research_text
@@ -875,10 +876,14 @@ def select_first_live_atomic_question(seasonal, minibench, post_id):
     return ([question], []) if label == "seasonal" else ([], [question])
 
 
-async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None):
+async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, automatic_one=False):
     """One run budget and event loop, including retrieval and both tournaments."""
     if first_live_post_id is not None and run_mode != "tournament":
         raise RuntimeError("First-live single-post restriction applies only to tournament mode")
+    if type(automatic_one) is not bool:
+        raise RuntimeError("Automatic candidate selector flag must be boolean")
+    if automatic_one and (first_live_post_id is not None or run_mode != "tournament"):
+        raise RuntimeError("Automatic one-question selection is exclusive to tournament mode")
     async with template_bot.run_budget():
         client = MetaculusClient()
         if run_mode == "tournament":
@@ -902,6 +907,13 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None):
                 # A missing, ineligible or already forecasted ID fails closed.
                 seasonal_questions, minibench_questions = select_first_live_atomic_question(
                     seasonal_questions, minibench_questions, first_live_post_id,
+                )
+            elif automatic_one:
+                # Future automation only; not exposed by CLI/workflows until
+                # separately approved with verified cost/eligibility policy.
+                # Both complete scans precede selection; output size <= 1.
+                seasonal_questions, minibench_questions = select_one_automatic_candidate(
+                    seasonal_questions, minibench_questions,
                 )
             # Empty authenticated inventories are a safe no-op: do not even
             # initialize the remote publication journal or request model work.
