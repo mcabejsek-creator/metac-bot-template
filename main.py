@@ -42,6 +42,7 @@ from forecasting_tools import (
 
 from forecasting_tools.data_models.questions import DiscreteQuestion
 from automatic_one_selection import select_one_automatic_candidate
+from sponsored_credit_guard import verify_sponsored_openrouter_credit
 from publication import SafePublicationMixin
 from runtime_limits import RuntimeLimitsMixin, cancellable_cli
 from research_safety import agent_research, validate_research_text
@@ -920,6 +921,19 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
             # Keep the two-phase read-only scan above mandatory in all cases.
             if not seasonal_questions and not minibench_questions:
                 return []
+            if automatic_one:
+                # After two COMPLETE inventories and exactly one vetted
+                # candidate, verify the donor-funded OpenRouter key with
+                # ONE read-only GET. No paid model/journal before this.
+                # The identity must be explicitly configured on future
+                # approved automatic workflows; missing it fails closed.
+                import os
+                await template_bot._run_blocking(
+                    verify_sponsored_openrouter_credit,
+                    os.environ.get("OPENROUTER_API_KEY", ""),
+                    expected_suffix=os.environ.get("METACULUS_SPONSORED_KEY_SUFFIX", ""),
+                    _timeout=30,
+                )
             seasonal = (
                 await template_bot.forecast_questions(
                     seasonal_questions, return_exceptions=True,
