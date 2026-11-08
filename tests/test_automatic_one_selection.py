@@ -51,8 +51,8 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         urgent = atomic(post_id=931, qid=731, hours_left=1)
         prior = atomic(post_id=932, qid=732, prior=True)
         self.assertEqual(select_one_automatic_candidate([urgent], [prior], now=NOW), ([], []))
-        at_margin = atomic(post_id=933, qid=733, hours_left=2)
-        self.assertEqual(MINIMUM_REMAINING, timedelta(hours=2))
+        at_margin = atomic(post_id=933, qid=733, hours_left=1.5)
+        self.assertEqual(MINIMUM_REMAINING, timedelta(minutes=90))
         self.assertEqual(select_one_automatic_candidate([at_margin], [], now=NOW), ([at_margin], []))
 
     def test_grouped_post_conditional_and_unforecasted_post_ambiguity_skipped(self):
