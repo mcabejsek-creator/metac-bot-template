@@ -921,10 +921,10 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
             # Keep the two-phase read-only scan above mandatory in all cases.
             if not seasonal_questions and not minibench_questions:
                 return []
-            if automatic_one:
-                # After two COMPLETE inventories and exactly one vetted
-                # candidate, verify the donor-funded OpenRouter key with
-                # ONE read-only GET. No paid model/journal before this.
+            if automatic_one or first_live_post_id is not None:
+                # BOTH unattended and explicitly supervised single-post modes
+                # must verify the DONATED OpenRouter key identity and reserve
+                # after both complete scans, before any paid model or journal.
                 # The identity must be explicitly configured on future
                 # approved automatic workflows; missing it fails closed.
                 import os
@@ -950,6 +950,27 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                         os.environ.get("PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF") == "YES"
                     ),
                 )
+            if first_live_post_id is not None:
+                # A supervised one-post attempt can cost up to FOUR Agent
+                # requests: 2 independent reports x initial + fact-check.
+                # Never automatically retry a possibly billed research POST.
+                # User-entered balance is a fresh manual observation, NOT
+                # an authoritative provider-enforced spending cap.
+                import os
+                from perplexity_run_budget import (
+                    PerplexityAutoRunBudget, MAX_SUPERVISED_AGENT_POST_ATTEMPTS,
+                )
+                template_bot._automatic_perplexity_budget = PerplexityAutoRunBudget(
+                    approved=(os.environ.get("PERPLEXITY_MANUAL_RESEARCH_APPROVAL")
+                              == "APPROVE_FOUR_AGENT_REQUESTS"),
+                    balance_usd=os.environ.get("PERPLEXITY_VERIFIED_BALANCE_USD"),
+                    verified_at=os.environ.get("PERPLEXITY_VERIFIED_AT_UTC"),
+                    run_cap_usd=os.environ.get("PERPLEXITY_MAX_AUTO_RUN_USD"),
+                    auto_recharge_confirmed_off=(
+                        os.environ.get("PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF") == "YES"
+                    ),
+                    max_attempts=MAX_SUPERVISED_AGENT_POST_ATTEMPTS,
+                )
             try:
                 seasonal = (
                     await template_bot.forecast_questions(
@@ -965,7 +986,7 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                 )
                 return seasonal + minibench
             finally:
-                if automatic_one:
+                if automatic_one or first_live_post_id is not None:
                     template_bot._automatic_perplexity_budget = None
         if run_mode == "metaculus_cup":
             template_bot.skip_previously_forecasted_questions = False

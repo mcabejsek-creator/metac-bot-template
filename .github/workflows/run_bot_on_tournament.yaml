@@ -19,8 +19,22 @@ on:
         type: string
         required: true
         default: DO_NOT_RUN
-  
-
+      research_approval:
+        description: "Approve at most FOUR variable-cost Perplexity Agent POST attempts, no retries"
+        type: choice
+        required: true
+        default: DO_NOT_RUN
+        options:
+          - DO_NOT_RUN
+          - APPROVE_FOUR_AGENT_REQUESTS
+      perplexity_auto_recharge_off:
+        description: "Confirm Perplexity API wallet automatic top-up is OFF"
+        type: choice
+        required: true
+        default: NO
+        options:
+          - NO
+          - YES
 
 permissions:
   contents: write
@@ -44,6 +58,8 @@ jobs:
       inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN' &&
       inputs.first_live_post_id != 'DO_NOT_RUN' &&
       inputs.first_live_post_id != '' &&
+      inputs.research_approval == 'APPROVE_FOUR_AGENT_REQUESTS' &&
+      inputs.perplexity_auto_recharge_off == 'YES' &&
       github.run_attempt == 1
     timeout-minutes: 210 # Setup/tests + 180-minute supervised bot + shutdown margin.
     runs-on: ubuntu-latest # determines the machine that will run the job - keep as is
@@ -80,6 +96,12 @@ jobs:
         # Store under Settings --> Secrets and variables --> Actions
         env:
           FIRST_LIVE_POST_ID: ${{ inputs.first_live_post_id }}
+          PERPLEXITY_MANUAL_RESEARCH_APPROVAL: ${{ inputs.research_approval }}
+          PERPLEXITY_VERIFIED_BALANCE_USD: ${{ secrets.VRCHCAB_PERPLEXITY_VERIFIED_BALANCE_USD }}
+          PERPLEXITY_VERIFIED_AT_UTC: ${{ secrets.VRCHCAB_PERPLEXITY_VERIFIED_AT_UTC }}
+          PERPLEXITY_MAX_AUTO_RUN_USD: ${{ secrets.VRCHCAB_PERPLEXITY_MAX_ONE_RUN_USD }}
+          PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF: ${{ inputs.perplexity_auto_recharge_off }}
+          METACULUS_SPONSORED_KEY_SUFFIX: "9fc"
           GITHUB_TOKEN: ${{ github.token }}
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }} # replace this with the name of the variable under which you stored your own Metaculus token
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}

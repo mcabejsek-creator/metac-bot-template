@@ -17,6 +17,7 @@ WORKFLOWS = [
     "metaculus_history_audit.yaml",
 ]
 NEW_BINDING = "METACULUS_TOKEN: " + "$" + "{{ secrets.METACULUS_TOKEN_V2 }}"
+READONLY_V2_BINDING = "METACULUS_TOKEN_V2: " + "$" + "{{ secrets.METACULUS_TOKEN_V2 }}"
 OLD_BINDING = "METACULUS_TOKEN: " + "$" + "{{ secrets.METACULUS_TOKEN }}"
 EXPECTED_DIR = ROOT / ".github" / "workflows"
 
@@ -36,7 +37,13 @@ class TokenIsolationRegression(unittest.TestCase):
                 data = path.read_text(encoding="utf-8")
                 self.assertNotIn(OLD_BINDING, data)
                 if 'secrets.METACULUS_TOKEN' in data:
-                    self.assertIn(NEW_BINDING, data)
+                    # The dedicated one-post history reader uses the V2
+                    # variable name directly; publishing entrypoints use
+                    # METACULUS_TOKEN. BOTH must bind only rotated V2 secret.
+                    self.assertTrue(
+                        NEW_BINDING in data or READONLY_V2_BINDING in data,
+                        f"Missing rotated V2 credential mapping: {path.name}",
+                    )
 
     def test_publication_flows_stay_manual(self):
         for name in WORKFLOWS[:4]:
