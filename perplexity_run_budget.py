@@ -12,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from threading import Lock
 
-MAX_AUTO_AGENT_POST_ATTEMPTS = 2  # initial research + fact-check; no retries
+MAX_AUTO_AGENT_POST_ATTEMPTS = 2  # future unattended path: one research + fact-check
+MAX_SUPERVISED_AGENT_POST_ATTEMPTS = 4  # two reports x (research + fact-check); no retries
 MAX_ATTESTATION_AGE = timedelta(hours=6)
 MINIMUM_WALLET_RESERVE_USD = Decimal("2.00")
 
@@ -56,9 +57,13 @@ class PerplexityAutoRunBudget:
 
     def __init__(self, *, approved=False, balance_usd=None,
                  verified_at=None, run_cap_usd=None, now=None,
-                 auto_recharge_confirmed_off=False):
+                 auto_recharge_confirmed_off=False,
+                 max_attempts=MAX_AUTO_AGENT_POST_ATTEMPTS):
         if (approved is not True or auto_recharge_confirmed_off is not True):
             raise PerplexityBudgetUnavailable("Perplexity unattended spending not approved")
+        if type(max_attempts) is not int or max_attempts not in (MAX_AUTO_AGENT_POST_ATTEMPTS, MAX_SUPERVISED_AGENT_POST_ATTEMPTS):
+            raise PerplexityBudgetUnavailable("Unsupported guarded Agent attempt ceiling")
+        self._max_attempts = max_attempts
         self._balance = _money(balance_usd, field="verified balance")
         self._cap = _money(run_cap_usd, field="approved run ceiling")
         if self._cap <= 0:
@@ -83,7 +88,7 @@ class PerplexityAutoRunBudget:
         with self._lock:
             if self._inflight or self._outcome_uncertain:
                 raise PerplexityBudgetUnavailable("Previous research outcome unverified")
-            if self._attempts >= MAX_AUTO_AGENT_POST_ATTEMPTS:
+            if self._attempts >= self._max_attempts:
                 raise PerplexityBudgetUnavailable("Perplexity attempt cap reached")
             if self._used >= self._cap:
                 raise PerplexityBudgetUnavailable("Perplexity observed run cap reached")
