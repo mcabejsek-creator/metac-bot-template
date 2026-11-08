@@ -34,4 +34,4 @@ jobs:
         with:
           python-version: "3.11"
       - name: Check live publisher workflow approval gates (no imports/LLMs/network)
-        run: python -B -m unittest -v tests.test_publish_workflow_approval
+        run: python -B tests/test_publish_workflow_approval.py
