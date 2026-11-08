@@ -210,7 +210,10 @@ class OutcomeEvidence:
     intent_id: str
     github_run_id: int
     run_completed: bool
+    workflow_conclusion: str
+    workflow_path: str
     run_intent_id: str
+    run_confirmed_post_id: int | None
     journal_confirmed_post_id: int | None
     metaculus_confirmed_post_id: int | None
     independently_checked_billing: bool
@@ -233,12 +236,16 @@ def assess_settlement(state, proof: OutcomeEvidence, *, now):
     if proof.intent_id != state.pending.intent_id or proof.run_intent_id != proof.intent_id:
         return ControllerTick(False, "workflow_intent_correlation_mismatch")
     if (type(proof.github_run_id) is not int or proof.github_run_id < 1
-            or proof.run_completed is not True or proof.independently_checked_billing is not True):
+            or proof.run_completed is not True or proof.independently_checked_billing is not True
+            or proof.workflow_conclusion != "success"
+            or proof.workflow_path != "autonomous_one_worker.yaml"):
         return ControllerTick(False, "unfinished_or_unverified_publication")
     if (type(proof.journal_confirmed_post_id) is not int
             or type(proof.metaculus_confirmed_post_id) is not int
+            or type(proof.run_confirmed_post_id) is not int
             or proof.journal_confirmed_post_id < 1
-            or proof.journal_confirmed_post_id != proof.metaculus_confirmed_post_id):
+            or proof.journal_confirmed_post_id != proof.metaculus_confirmed_post_id
+            or proof.run_confirmed_post_id != proof.metaculus_confirmed_post_id):
         return ControllerTick(False, "journal_metaculus_disagreement")
     try:
         instant = _now(now)
