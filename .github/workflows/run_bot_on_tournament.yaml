@@ -1,7 +1,19 @@
 name: Forecast on new AI tournament questions
 
+# Live publishing is deliberately locked until one explicit approved dispatch.
+# Old cron-job.org calls without the new confirmation input are skipped.
+# Reruns of the same workflow_dispatch are never publishing authorization.
 on:
   workflow_dispatch:
+    inputs:
+      publication_approval:
+        description: "ONE live forecast/publish run; requires separate operator authorization"
+        type: choice
+        required: true
+        default: DO_NOT_RUN
+        options:
+          - DO_NOT_RUN
+          - APPROVE_ONE_LIVE_PUBLICATION_RUN
   
 
 
@@ -22,6 +34,10 @@ concurrency:
 # Daily job to run the simple forecast bot
 jobs:
   forecast_job:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN' &&
+      github.run_attempt == 1
     timeout-minutes: 210 # Setup/tests + 180-minute supervised bot + shutdown margin.
     runs-on: ubuntu-latest # determines the machine that will run the job - keep as is
     steps: # sets up the steps that will be run in order
