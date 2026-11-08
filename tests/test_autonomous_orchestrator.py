@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .support import OfflineTestCase
-from .test_dispatch_intent_controller import APPROVED, FakeStore, snapshot, NOW
+from .test_dispatch_intent_controller import APPROVED, FakeStore, snapshot, daily_at, NOW
 from dispatch_intent_controller import ControllerState, propose_reservation
 from autonomous_orchestrator import (
     AutonomousPreflightRejected, KillSwitchUncertain,
@@ -27,6 +27,7 @@ def verified_readings(**changes):
         funded_openrouter_ok=True,
         perplexity_checked_at=NOW,
         perplexity_spend_ok=True,
+        daily_spend=daily_at(NOW),
         journal_checked_at=NOW,
         prior_publication_certain=True,
         operator_approval_confirmed=True,
@@ -98,6 +99,25 @@ class AutonomousOrchestratorTests(OfflineTestCase):
         self.assertEqual(denied2.reason, "approval_generation_mismatch")
         self.assertEqual(src.calls, 0)
         self.assertEqual(store.calls, ["GET", "GET"])
+
+    def test_daily_spend_must_be_trusted_and_current_before_controller_cas(self):
+        for bad in (None, daily_at(NOW-timedelta(minutes=6))):
+            with self.subTest(bad=bad):
+                store = FakeStore()
+                source = Source(verified_readings(daily_spend=bad))
+                with self.assertRaises(AutonomousPreflightRejected):
+                    reserve_only_after_preflight(
+                        store, source, now=NOW, approval_epoch=3,
+                        explicit_control_write_approved=True,
+                    )
+                self.assertEqual(store.calls, ["GET"])
+        unverified = replace(daily_at(NOW), complete=False)
+        outcome = evaluate_offline_tick(
+            FakeStore(), Source(verified_readings(daily_spend=unverified)),
+            now=NOW, approval_epoch=3,
+        )
+        self.assertFalse(outcome.allowed)
+        self.assertEqual(outcome.reason, "verified_daily_spend_unavailable")
 
     def test_complete_trusted_synthetic_snapshot_is_only_eligible_plan(self):
         src = Source(verified_readings())
