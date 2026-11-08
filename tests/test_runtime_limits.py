@@ -228,6 +228,52 @@ class RuntimeTests(RuntimeTestHelpers, OfflineTestCase):
         self.assertEqual(reports, identifiers)
         self.assertEqual(sum(budget == 10800 for budget, _ in observed), 1)
 
+    async def test_empty_both_tournament_scans_never_initialize_publication(self):
+        # A real empty snapshot must not touch the remote journal, model
+        # gateway or POST path even if publishing is configured.
+        bot = self.bot(publish_reports_to_metaculus=True)
+        scanned = []
+
+        def scan(client, tournament, *, read_page):
+            self.assertIs(client, bot.metaculus_client)
+            scanned.append(tournament)
+            return []
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(
+            bot, "forecast_questions",
+            side_effect=AssertionError("No empty forecast batch may reach the publisher")))
+        self.start_patch(patch.object(
+            bot, "_publication_runtime",
+            side_effect=AssertionError("Remote publication journal must not open")))
+        result = await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(result, [])
+        self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+        self.assertEqual(self.publication_store.pending("synthetic"), None)
+
+    async def test_only_nonempty_tournament_is_forecast(self):
+        bot = self.bot()
+        scans, forecast_calls = [], []
+
+        def scan(client, tournament, *, read_page):
+            scans.append(tournament)
+            return [] if len(scans) == 1 else [3]
+
+        async def forecast(questions, return_exceptions):
+            self.assertEqual(scans, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+            self.assertTrue(return_exceptions)
+            forecast_calls.append(list(questions))
+            return list(questions)
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(bot, "forecast_questions", forecast))
+        result = await app.forecast_for_mode(bot, "tournament")
+        self.assertEqual(result, [3])
+        self.assertEqual(forecast_calls, [[3]])
+
     async def test_failed_second_scan_never_starts_forecasting(self):
         bot = self.bot()
         scanned, forecasts_started = [], []
