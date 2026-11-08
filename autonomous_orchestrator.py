@@ -127,6 +127,8 @@ def evaluate_offline_tick(store, source, *, now, approval_epoch):
         raise AutonomousPreflightRejected("Missing persistent controller state")
     if not state.enabled:
         return ControllerTick(False, "persistent_kill_switch_disabled")
+    if type(approval_epoch) is not int or approval_epoch != state.approval_epoch:
+        return ControllerTick(False, "approval_generation_mismatch")
     if state.pending is not None:
         return ControllerTick(False, "pending_or_uncertain_dispatch_requires_reconciliation")
     if state.last_intent_at is not None:
@@ -154,6 +156,8 @@ def reserve_only_after_preflight(store, source, *, now, approval_epoch,
         raise AutonomousPreflightRejected("Missing persistent controller state")
     if not state.enabled:
         return ControllerTick(False, "persistent_kill_switch_disabled")
+    if type(approval_epoch) is not int or approval_epoch != state.approval_epoch:
+        return ControllerTick(False, "approval_generation_mismatch")
     if state.pending is not None:
         return ControllerTick(False, "pending_or_uncertain_dispatch_requires_reconciliation")
     last = (datetime.fromisoformat(state.last_intent_at.replace("Z", "+00:00"))
@@ -256,6 +260,13 @@ def assess_settlement(state, proof: OutcomeEvidence, *, now):
             ("provider billing", proof.billing_checked_at),
         ):
             _recent(stamp, instant, label, max_age=timedelta(days=7))
+        completed = _now(proof.github_finished_at)
+        # Later source audits must actually follow the completed workflow.
+        # Otherwise a stale snapshot from an earlier run is not evidence.
+        for stamp in (proof.journal_checked_at, proof.metaculus_checked_at,
+                      proof.billing_checked_at):
+            if _now(stamp) < completed:
+                return ControllerTick(False, "settlement_sources_predate_workflow_completion")
     except AutonomousPreflightRejected:
         return ControllerTick(False, "settlement_evidence_stale_or_missing")
     return ControllerTick(True, "eligible_for_separately_authorized_manual_reconciliation", proof.intent_id)
