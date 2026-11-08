@@ -1,5 +1,5 @@
 # Single explicitly approved Metaculus GET, no cron, no publisher.
-# The historical target is hardcoded to the previously approved post 46347.
+# Exact-choice selection restricts GETs to the two already approved live posts.
 name: Vrchcab manual single-post forecast history (GET only)
 
 on:
@@ -13,6 +13,15 @@ on:
         options:
           - DO_NOT_RUN
           - YES_ONE_HISTORY_GET
+      post_id:
+        description: "ONE previously published public post ID to verify (no discovery)"
+        type: choice
+        required: true
+        default: DO_NOT_RUN
+        options:
+          - DO_NOT_RUN
+          - "46347"
+          - "46335"
 
 permissions:
   contents: read
@@ -26,6 +35,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.confirmation == 'YES_ONE_HISTORY_GET' &&
+      (inputs.post_id == '46347' || inputs.post_id == '46335') &&
       github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -42,6 +52,7 @@ jobs:
         env:
           METACULUS_TOKEN_V2: ${{ secrets.METACULUS_TOKEN_V2 }}
           VRCHCAB_ONE_HISTORY_GET_APPROVAL: ${{ inputs.confirmation }}
+          VRCHCAB_ONE_HISTORY_POST_ID: ${{ inputs.post_id }}
           GITHUB_TOKEN: ''
           PERPLEXITY_API_KEY: ''
           OPENROUTER_API_KEY: ''
