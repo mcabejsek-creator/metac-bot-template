@@ -84,6 +84,21 @@ class AutonomousOrchestratorTests(OfflineTestCase):
         self.assertFalse(blocked.allowed)
         self.assertEqual(src.calls, 0)
 
+    def test_mismatched_epoch_never_reads_provider_or_writes_control_state(self):
+        store = FakeStore()
+        src = Source(verified_readings())
+        denied = evaluate_offline_tick(store, src, now=NOW, approval_epoch=4)
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "approval_generation_mismatch")
+        denied2 = reserve_only_after_preflight(
+            store, src, now=NOW, approval_epoch=4,
+            explicit_control_write_approved=True,
+        )
+        self.assertFalse(denied2.allowed)
+        self.assertEqual(denied2.reason, "approval_generation_mismatch")
+        self.assertEqual(src.calls, 0)
+        self.assertEqual(store.calls, ["GET", "GET"])
+
     def test_complete_trusted_synthetic_snapshot_is_only_eligible_plan(self):
         src = Source(verified_readings())
         store = FakeStore()
@@ -281,6 +296,8 @@ class AutonomousOrchestratorTests(OfflineTestCase):
             {"independently_checked_billing": False},
             {"github_run_id": 0},
             {"metaculus_checked_at": NOW-timedelta(days=8)},
+            {"github_finished_at": NOW, "journal_checked_at": NOW-timedelta(minutes=1)},
+            {"github_finished_at": NOW, "billing_checked_at": NOW-timedelta(minutes=1)},
         ):
             with self.subTest(changes=changes):
                 self.assertFalse(assess_settlement(
