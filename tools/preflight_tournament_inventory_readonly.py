@@ -1,7 +1,10 @@
 """Manual, opt-in and strictly read-only FutureEval/MiniBench inventory preflight.
 
-Never imports the application bot, opens a publication journal, invokes an LLM,
-posts a forecast, or emits question IDs, private history, titles, or credentials.
+Never imports the application bot, opens a publication journal or invokes an LLM.
+Default count-only mode emits no IDs, history, titles or credentials. A distinct
+operator approval can reveal exactly ONE selected PUBLIC POST ID and URL,
+never private/internal question IDs, private history, or forecast values.
+Neither mode posts a forecast.
 
 This program NEVER runs via a schedule and has no network activity at import time.
 The calling workflow must explicitly supply the V2 token and an approval input.
@@ -28,6 +31,7 @@ from bounded_open_question_selection import (
     scan_open_tournament,
 )
 from question_context import effective_close, utc_date
+from manual_next_candidate_preview import preview_operator_candidate
 
 FUTUREEVAL = 33121
 MINIBENCH = "minibench"
@@ -107,8 +111,13 @@ def _candidate_check(first, second, candidate_id):
     }
 
 
-def inspect(client, read_page, *, now=None, candidate_id=None):
+def inspect(client, read_page, *, now=None, candidate_id=None,
+            preview_best_candidate=False):
     """Run full bounded scans before reporting any partial results."""
+    if type(preview_best_candidate) is not bool:
+        raise IncompleteQuestionScan("Public candidate preview must be boolean")
+    if preview_best_candidate and candidate_id is not None:
+        raise IncompleteQuestionScan("Public preview and operator-selected ID are exclusive")
     if candidate_id is not None and (type(candidate_id) is not int or candidate_id <= 0):
         raise IncompleteQuestionScan("Invalid operator-supplied public post ID")
     timestamp = utc_date(now or datetime.now(timezone.utc))
@@ -141,6 +150,12 @@ def inspect(client, read_page, *, now=None, candidate_id=None):
     }
     if candidate_id is not None:
         report["operator_selected_candidate"] = _candidate_check(first, second, candidate_id)
+    if preview_best_candidate:
+        # The public post ID is printed ONLY with its own explicit manual
+        # workflow confirmation, after BOTH entire inventories succeeded.
+        report["operator_next_public_candidate"] = preview_operator_candidate(
+            first, second, now=timestamp,
+        )
     return report
 
 
@@ -264,7 +279,8 @@ def main():
         return
     # The real path runs only when invoked explicitly by the manual workflow.
     # No bypass via importing the module (main guard below).
-    if os.getenv("VRCHCAB_READONLY_PREFLIGHT_APPROVED") != "YES_READ_ONLY_MAX_TEN_GETS":
+    confirmation = os.getenv("VRCHCAB_READONLY_PREFLIGHT_APPROVED")
+    if confirmation not in ("YES_READ_ONLY_MAX_TEN_GETS", "YES_FIND_ONE_PUBLIC_POST_ID"):
         print("Preflight stopped: explicit approval marker required", file=sys.stderr)
         sys.exit(2)
     token = os.environ.get("METACULUS_TOKEN", "")
@@ -280,11 +296,16 @@ def main():
             if not raw_candidate.isascii() or not raw_candidate.isdecimal() or int(raw_candidate) <= 0:
                 raise IncompleteQuestionScan("Invalid candidate input")
             candidate_id = int(raw_candidate)
+        if confirmation == "YES_FIND_ONE_PUBLIC_POST_ID" and candidate_id is not None:
+            raise IncompleteQuestionScan("Public preview cannot also inspect a supplied post")
         from forecasting_tools import MetaculusClient
         client = MetaculusClient(token=token.strip().removeprefix("Token ").strip())
         reader = BoundedPostReader(client)
         print("Starting approved GET-only, at-most-ten-request manual preflight", flush=True)
-        report = inspect(client, reader, candidate_id=candidate_id)
+        report = inspect(
+            client, reader, candidate_id=candidate_id,
+            preview_best_candidate=(confirmation == "YES_FIND_ONE_PUBLIC_POST_ID"),
+        )
         print(json.dumps(report, sort_keys=True), flush=True)
     except Exception:
         # Never log raw API payloads, question titles, URLs, tokens or private history.
