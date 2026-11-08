@@ -1,0 +1,49 @@
+{
+  "job": {
+    "title": "Vrchcab – EXTERNAL Metaculus WATCH ONLY (inactive)",
+    "enabled": false,
+    "saveResponses": false,
+    "url": "https://api.github.com/repos/mcabejsek-creator/metac-bot-template/actions/workflows/external_readonly_metaculus_watch.yaml/dispatches",
+    "requestMethod": 1,
+    "requestTimeout": 30,
+    "redirectSuccess": false,
+    "schedule": {
+      "timezone": "UTC",
+      "expiresAt": 0,
+      "hours": [
+        -1
+      ],
+      "mdays": [
+        -1
+      ],
+      "minutes": [
+        1,
+        16,
+        31,
+        46
+      ],
+      "months": [
+        -1
+      ],
+      "wdays": [
+        -1
+      ]
+    },
+    "notification": {
+      "onFailure": true,
+      "onFailureCount": 1,
+      "onDisable": true,
+      "onSuccess": false,
+      "onSslCertExpiry": true
+    },
+    "extendedData": {
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer REPLACE_IN_CRON_JOB_ORG_CONSOLE_ONLY",
+        "X-GitHub-Api-Version": "2026-03-10"
+      },
+      "body": "{\"ref\":\"main\",\"inputs\":{\"mode\":\"CHECK_OPEN_POSTS_READ_ONLY\"}}"
+    }
+  }
+}
