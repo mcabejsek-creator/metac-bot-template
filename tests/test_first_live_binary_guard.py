@@ -214,7 +214,7 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         self.assertIn("github.run_attempt == 1", source)
         self.assertIn('FIRST_LIVE_POST_ID: ${{ inputs.first_live_post_id }}', source)
         self.assertIn('--first-live-post-id "$FIRST_LIVE_POST_ID"', source)
-        self.assertNotIn("\\n  schedule:", source)
+        self.assertNotIn("\n  schedule:", source)
         self.assertIn("inputs.research_approval == 'APPROVE_FOUR_AGENT_REQUESTS'", source)
         self.assertIn("inputs.perplexity_auto_recharge_off == 'YES'", source)
         self.assertIn("PERPLEXITY_MANUAL_RESEARCH_APPROVAL:", source)
