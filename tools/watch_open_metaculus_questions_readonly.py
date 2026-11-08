@@ -47,7 +47,7 @@ def make_request(project, token):
     params = [
         ("limit", str(FIRST_PAGE_LIMIT)),
         ("offset", "0"),
-        ("order_by", "-published_time"),
+        ("order_by", "-published_at"),
         ("with_cp", "true"),
         ("include_conditional_cps", "true"),
         ("statuses", "open"),
