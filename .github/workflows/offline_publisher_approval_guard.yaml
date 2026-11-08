@@ -1,0 +1,37 @@
+# Isolated PR-only review of three default-off publishing workflow gates.
+# No GitHub write token, Metaculus secrets, external network calls or publication.
+name: Verify default-deny publisher workflow gate (offline only)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/run_bot_on_tournament.yaml"
+      - ".github/workflows/run_bot_on_metaculus_cup.yaml"
+      - ".github/workflows/test_bot.yaml"
+      - "tests/test_publish_workflow_approval.py"
+      - ".github/workflows/offline_publisher_approval_guard.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline_gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      GITHUB_TOKEN: ""
+      OPENAI_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      PERPLEXITY_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check live publisher workflow approval gates (no imports/LLMs/network)
+        run: python -B tests/test_publish_workflow_approval.py
