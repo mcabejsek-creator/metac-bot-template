@@ -75,3 +75,13 @@ https://www.perplexity.ai/hub/legal/perplexity-api-terms-of-service
 **This PR and its offline CI are safe to review/merge but DO NOT authorize
 any paid Perplexity request, Metaculus GET/POST, automatic publication or
 journal write.**
+
+## Response-cost evidence addendum (Nov. 8, 2026; draft PR #29)
+
+- `PerplexityAutoRunBudget.cost_observation()` returns **only** aggregate and per-response sanitized USD costs from calls that reported `usage.cost.total_cost`. It also reports attempted requests, counts of priced vs unpriced attempts, in-flight status and any unresolved outcome. The attempted count includes a request reserved **before** sending; missing/timeout responses are NOT priced at $0.
+- A legitimate but unusually expensive response is retained in the observation even when it already exceeded the approved per-run threshold and further requests are stopped.
+- The observation never contains a prompt, completion, token, account secret, original API body or dashboard cookie.
+- `provider_invoice_verified` and `eligible_for_automatic_daily_reset` are always **false**. A set of successful model responses is not an independent provider invoice and cannot prove the wallet balance or cost of a network timeout.
+- There is **no live persistence or use in the currently deployed publisher**. The controller's future durable daily quota and its independent budget attestation remain distinct safeguards. A separately authorized adapter will eventually have to persist sanitized receipt observations and verify complete billing against an authoritative source or conservative manual operator reconciliation before resetting a UTC-day quota.
+- No documented API-key-accessible wallet/usage endpoint has been confirmed. Do **not** store Perplexity browser cookies, use undocumented dashboard endpoints, treat zero returned cost as proof of no charges, or automatically refill prepaid credits.
+- The two earlier supervised live forecasts cannot be retroactively priced with this new field. The dashboard screenshot around run #42502350027 showed about $0.01 extra 30-day spending, but not an exact itemized invoice. Later live responses can produce cost observations when explicitly authorized; this draft sends none.
