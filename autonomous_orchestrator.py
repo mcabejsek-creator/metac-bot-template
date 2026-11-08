@@ -266,6 +266,9 @@ def assess_settlement(state, proof: OutcomeEvidence, *, now):
         ):
             _recent(stamp, instant, label, max_age=timedelta(days=7))
         completed = _now(proof.github_finished_at)
+        reserved = datetime.fromisoformat(state.pending.reserved_at.replace("Z", "+00:00"))
+        if completed < reserved:
+            return ControllerTick(False, "workflow_completion_predates_intent")
         # Later source audits must actually follow the completed workflow.
         # Otherwise a stale snapshot from an earlier run is not evidence.
         for stamp in (proof.journal_checked_at, proof.metaculus_checked_at,
