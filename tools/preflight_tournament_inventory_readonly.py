@@ -61,14 +61,14 @@ def _summary(questions, now):
 
 
 def _candidate_check(first, second, candidate_id):
-    """Confirm an operator-supplied ID without disclosing the ID or forecast history.
+    """Confirm an operator-supplied public POST ID without logging it or forecast history.
 
     This is an optional snapshot-only check. It must not be mistaken for
     tournament eligibility, a full historic reconciliation, or live POST approval.
     """
     if type(candidate_id) is not int or candidate_id <= 0:
-        raise IncompleteQuestionScan("Invalid operator-supplied candidate ID")
-    matches = [q for q in (*first, *second) if q.id_of_question == candidate_id]
+        raise IncompleteQuestionScan("Invalid operator-supplied public post ID")
+    matches = [q for q in (*first, *second) if q.id_of_post == candidate_id]
     matched = len(matches) == 1
     q = matches[0] if matched else None
     eligible_binary = (
@@ -84,14 +84,14 @@ def _candidate_check(first, second, candidate_id):
         "competition_participation_verified": False,
         "publish_time_status_verified": False,
         "live_publication_authorized": False,
-        "operator_supplied_question_id_not_logged": True,
+        "operator_supplied_public_post_id_not_logged": True,
     }
 
 
 def inspect(client, read_page, *, now=None, candidate_id=None):
     """Run full bounded scans before reporting any partial results."""
     if candidate_id is not None and (type(candidate_id) is not int or candidate_id <= 0):
-        raise IncompleteQuestionScan("Invalid operator-supplied candidate ID")
+        raise IncompleteQuestionScan("Invalid operator-supplied public post ID")
     timestamp = utc_date(now or datetime.now(timezone.utc))
     budget = RequestBudget(read_page)
     first = scan_open_tournament(client, FUTUREEVAL, read_page=budget, now=timestamp)
@@ -134,6 +134,7 @@ def self_check():
         return SimpleNamespace(
             state="open",
             id_of_question=qid,
+            id_of_post=qid + 200,
             already_forecasted=already,
             open_time=now - timedelta(days=1),
             close_time=now + (timedelta(hours=2) if close_soon else timedelta(days=2)),
@@ -183,12 +184,13 @@ def self_check():
     assert '"112"' not in serialized and '"113"' not in serialized
     assert report["tournament_participation_eligibility_verified"] is False
     # The opt-in candidate check never exposes the user-supplied ID.
-    with_candidate = inspect(FakeClient(), reader, now=now, candidate_id=111)
+    with_candidate = inspect(FakeClient(), reader, now=now, candidate_id=311)
     check = with_candidate["operator_selected_candidate"]
     assert check["present_once_in_validated_open_inventory"] is True
     assert check["binary_with_empty_token_forecast_history_in_snapshot"] is False
     assert check["live_publication_authorized"] is False
     assert "111" not in json.dumps(with_candidate)
+    assert "311" not in json.dumps(with_candidate)
     assert with_candidate["authenticated_get_attempts"] == 6
     try:
         inspect(FakeClient(), reader, now=now, candidate_id=-1)
@@ -251,7 +253,7 @@ def main():
     try:
         # Optional operator input, never emitted to logs. It does not authorize
         # an API request; the existing explicit GET approval is still mandatory.
-        raw_candidate = os.getenv("VRCHCAB_CANDIDATE_QUESTION_ID", "").strip()
+        raw_candidate = os.getenv("VRCHCAB_CANDIDATE_POST_ID", "").strip()
         candidate_id = None
         if raw_candidate:
             if not raw_candidate.isascii() or not raw_candidate.isdecimal() or int(raw_candidate) <= 0:
