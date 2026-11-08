@@ -8,8 +8,8 @@ from urllib.parse import parse_qs, urlparse
 from .support import OfflineTestCase
 from github_publisher_queue_readonly import (
     GitHubPublisherQueueReader, GitHubRunEvidenceUnavailable,
-    KNOWN_STUCK_RUN_ID, PUBLISHING_WORKFLOW_ID, SCANNED_STATES,
-    MAX_RUNS_PER_STATE, _STATUS_URLS,
+    KNOWN_STUCK_RUN_ID, PUBLISHING_WORKFLOW_ID, PUBLISHING_WORKFLOW_PATHS,
+    SCANNED_STATES, MAX_RUNS_PER_STATE, _STATUS_URLS,
 )
 
 
@@ -55,8 +55,13 @@ class FakeGitHub:
         return Reply(data)
 
 
-def run(run_id, state, workflow=PUBLISHING_WORKFLOW_ID):
-    return {"id": run_id, "status": state, "workflow_id": workflow}
+def run(run_id, state, workflow=PUBLISHING_WORKFLOW_ID, path=None):
+    if path is None:
+        path = (".github/workflows/run_bot_on_tournament.yaml" if
+                workflow == PUBLISHING_WORKFLOW_ID else
+                ".github/workflows/watch_open_metaculus_questions_readonly.yaml")
+    return {"id": run_id, "status": state, "workflow_id": workflow,
+            "path": path}
 
 
 class PublisherQueueReadOnlyTests(OfflineTestCase):
@@ -108,6 +113,46 @@ class PublisherQueueReadOnlyTests(OfflineTestCase):
         self.assertEqual(report.active_publisher_runs, 1)
         self.assertEqual(report.queued_publisher_runs, 3)
         self.assertEqual(report.publisher_run_ids, (2, 5, 7, 8))
+
+    def test_all_three_publishers_and_future_worker_block(self):
+        paths = (
+            ".github/workflows/run_bot_on_tournament.yaml",
+            ".github/workflows/run_bot_on_metaculus_cup.yaml",
+            ".github/workflows/test_bot.yaml",
+            ".github/workflows/autonomous_one_worker.yaml",
+        )
+        self.assertEqual(PUBLISHING_WORKFLOW_PATHS, frozenset(paths))
+        for path in paths:
+            with self.subTest(path=path):
+                fake = FakeGitHub({"waiting": [
+                    run(600, "waiting", workflow=99999999, path=path),
+                ]})
+                result = GitHubPublisherQueueReader(
+                    token="SYNTHETIC", opener=fake, clock=lambda: NOW
+                ).read()
+                self.assertFalse(result.clear_to_consider_dispatch)
+                self.assertEqual(result.queued_publisher_runs, 1)
+                self.assertEqual(result.publisher_run_ids, (600,))
+
+    def test_missing_workflow_path_never_proves_clear_queue(self):
+        missing = run(601, "queued", workflow=410403549)
+        missing.pop("path")
+        fake = FakeGitHub({"queued": [missing]})
+        with self.assertRaises(GitHubRunEvidenceUnavailable):
+            GitHubPublisherQueueReader(
+                token="SYNTHETIC", opener=fake, clock=lambda: NOW
+            ).read()
+
+    def test_historic_publisher_id_blocks_after_path_rename(self):
+        fake = FakeGitHub({"queued": [run(
+            KNOWN_STUCK_RUN_ID, "queued", workflow=PUBLISHING_WORKFLOW_ID,
+            path=".github/workflows/renamed_old_publisher.yaml"
+        )]})
+        result = GitHubPublisherQueueReader(
+            token="SYNTHETIC", opener=fake, clock=lambda: NOW
+        ).read()
+        self.assertTrue(result.known_stuck_queued)
+        self.assertFalse(result.clear_to_consider_dispatch)
 
     def test_missing_authentication_denies_before_any_get(self):
         for token in ("", " ", None, " abc ", 5):
