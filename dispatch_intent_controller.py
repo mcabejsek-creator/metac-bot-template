@@ -12,21 +12,26 @@ must remain blocked until verified reconciliation in a future reviewed PR.
 """
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 import re
 
-from scheduler_policy import DispatchSnapshot, DispatchDecision, evaluate_dispatch, POLL_INTERVAL
+from scheduler_policy import DispatchSnapshot, evaluate_dispatch, POLL_INTERVAL
 
-VERSION = 1
+VERSION = 2  # v1 controller files must be explicitly reviewed/migrated; never silently upgraded
 STATE_FIELDS = frozenset((
     "version", "enabled", "approval_epoch", "last_intent_at", "last_slot", "pending",
+    "daily_quota",
 ))
+DAILY_FIELDS = frozenset(("day_utc", "attempts", "reserved_usd"))
 PENDING_FIELDS = frozenset(("intent_id", "reserved_at", "slot"))
 _SLOT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:(?:00|15|30|45):00Z")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _HEX = re.compile(r"[0-9a-f]{64}")
+_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_MONEY = re.compile(r"[0-9]+(?:\.[0-9]{1,6})?")
 STATE_MAX_BYTES = 4096
 
 
@@ -69,6 +74,44 @@ class PendingIntent:
         if not _SLOT.fullmatch(self.slot) or not slot <= when < slot + POLL_INTERVAL:
             raise InvalidControlState("Invalid 15-minute dispatch window")
 
+    
+def _strict_money(value):
+    if type(value) is not str or _MONEY.fullmatch(value) is None:
+        raise InvalidControlState("Invalid exact USD quota value")
+    try:
+        amount = Decimal(value)
+    except InvalidOperation:
+        raise InvalidControlState("Invalid USD quota number") from None
+    if not amount.is_finite() or amount < 0 or amount > Decimal("10000"):
+        raise InvalidControlState("Invalid USD quota magnitude")
+    return amount
+
+
+@dataclass(frozen=True)
+class DailyQuota:
+    """Persisted count + cumulative budget reservation in the SAME CAS as intent.
+
+    The reservations never decrease automatically when an attempt succeeds,
+    fails, or times out. This is conservative, and not proof of provider billing.
+    UTC-day rollover requires an independently approved reconciliation/reset.
+    """
+    day_utc: str
+    attempts: int
+    reserved_usd: str
+
+    def __post_init__(self):
+        if type(self.day_utc) is not str or _DAY.fullmatch(self.day_utc) is None:
+            raise InvalidControlState("Daily quota needs canonical UTC date")
+        try:
+            parsed = date.fromisoformat(self.day_utc)
+        except ValueError:
+            raise InvalidControlState("Impossible daily quota date") from None
+        if parsed.isoformat() != self.day_utc:
+            raise InvalidControlState("Non-canonical daily quota date")
+        if type(self.attempts) is not int or not 0 <= self.attempts <= 10000:
+            raise InvalidControlState("Invalid durable daily attempt count")
+        _strict_money(self.reserved_usd)
+
 
 @dataclass(frozen=True)
 class ControllerState:
@@ -78,6 +121,7 @@ class ControllerState:
     last_intent_at: str | None = None
     last_slot: str | None = None
     pending: PendingIntent | None = None
+    daily_quota: DailyQuota | None = None
 
     def __post_init__(self):
         if type(self.version) is not int or self.version != VERSION:
@@ -86,6 +130,8 @@ class ControllerState:
             raise InvalidControlState("Controller activation must be a boolean")
         if type(self.approval_epoch) is not int or not 0 <= self.approval_epoch < 100000000:
             raise InvalidControlState("Invalid activation generation")
+        if self.daily_quota is not None and not isinstance(self.daily_quota, DailyQuota):
+            raise InvalidControlState("Malformed persistent daily quota")
         if self.enabled and self.approval_epoch == 0:
             raise InvalidControlState("Unapproved controller cannot be enabled")
         if (self.last_intent_at is None) != (self.last_slot is None):
@@ -104,6 +150,9 @@ class ControllerState:
             expected = _intent_id(self.approval_epoch, self.pending.slot)
             if self.pending.intent_id != expected:
                 raise InvalidControlState("Pending intent does not match approval epoch")
+            if (self.daily_quota is None or self.daily_quota.attempts < 1
+                    or self.daily_quota.day_utc != when.date().isoformat()):
+                raise InvalidControlState("Pending intent without same-day durable budget reservation")
 
     @classmethod
     def decode(cls, payload):
@@ -127,7 +176,12 @@ class ControllerState:
             if not isinstance(pending, dict) or frozenset(pending) != PENDING_FIELDS:
                 raise InvalidControlState("Invalid pending intent schema")
             pending = PendingIntent(**pending)
-        return cls(**{**obj, "pending": pending})
+        daily = obj["daily_quota"]
+        if daily is not None:
+            if not isinstance(daily, dict) or frozenset(daily) != DAILY_FIELDS:
+                raise InvalidControlState("Invalid durable daily quota schema")
+            daily = DailyQuota(**daily)
+        return cls(**{**obj, "pending": pending, "daily_quota": daily})
 
     def encode(self):
         data = {
@@ -136,6 +190,11 @@ class ControllerState:
             "approval_epoch": self.approval_epoch,
             "last_intent_at": self.last_intent_at,
             "last_slot": self.last_slot,
+            "daily_quota": None if self.daily_quota is None else {
+                "day_utc": self.daily_quota.day_utc,
+                "attempts": self.daily_quota.attempts,
+                "reserved_usd": self.daily_quota.reserved_usd,
+            },
             "pending": None if self.pending is None else {
                 "intent_id": self.pending.intent_id,
                 "reserved_at": self.pending.reserved_at,
@@ -176,6 +235,24 @@ def propose_reservation(state, snapshot, *, approval_epoch):
 
     stamp = _iso(snapshot.now)
     when = _instant(stamp)
+    daily = state.daily_quota
+    if daily is None:
+        return ReservationResult(False, "durable_daily_quota_not_initialized", state)
+    if daily.day_utc != when.date().isoformat():
+        return ReservationResult(False, "durable_daily_quota_day_mismatch", state)
+    checked = snapshot.daily_spend
+    if checked.attempted_dispatches != daily.attempts:
+        return ReservationResult(False, "audited_and_durable_daily_counts_disagree", state)
+    if daily.attempts >= checked.max_daily_dispatches:
+        return ReservationResult(False, "durable_daily_count_exhausted", state)
+    charged = _strict_money(checked.charged_usd)
+    approved_cap = _strict_money(checked.approved_day_cap_usd)
+    reserve = _strict_money(checked.approved_run_reserve_usd)
+    accumulated = _strict_money(daily.reserved_usd)
+    # Never trust a smaller observed charge to erase previous reservations.
+    # The stronger of durable reserves and independently observed charges wins.
+    if max(accumulated, charged) + reserve > approved_cap:
+        return ReservationResult(False, "durable_daily_budget_exhausted", state)
     slot = when.replace(minute=15*(when.minute//15), second=0)
     slot_text = _iso(slot)
     if state.last_slot is not None:
@@ -191,8 +268,13 @@ def propose_reservation(state, snapshot, *, approval_epoch):
         reserved_at=stamp,
         slot=slot_text,
     )
+    new_daily = replace(
+        daily, attempts=daily.attempts + 1,
+        reserved_usd=format(accumulated + reserve, "f"),
+    )
     new_state = replace(
         state, last_intent_at=stamp, last_slot=slot_text, pending=intent,
+        daily_quota=new_daily,
     )
     return ReservationResult(True, "needs_durable_compare_and_swap", new_state, intent.intent_id)
 
