@@ -8,7 +8,8 @@ import urllib.error
 from .support import OfflineTestCase
 from perplexity_run_budget import (
     PerplexityAutoRunBudget, PerplexityBudgetUnavailable,
-    MAX_AUTO_AGENT_POST_ATTEMPTS, MINIMUM_WALLET_RESERVE_USD,
+    MAX_AUTO_AGENT_POST_ATTEMPTS, MAX_SUPERVISED_AGENT_POST_ATTEMPTS,
+    MINIMUM_WALLET_RESERVE_USD,
 )
 from research_safety import call_agent_once
 
@@ -93,6 +94,40 @@ class PerplexityRunBudgetTests(OfflineTestCase):
         self.assertEqual(guard.observed_cost_usd, "0.22")
         with self.assertRaises(PerplexityBudgetUnavailable):
             guard.begin_attempt()
+
+    def test_manual_two_report_budget_allows_exactly_four_no_retry_attempts(self):
+        self.assertEqual(MAX_SUPERVISED_AGENT_POST_ATTEMPTS, 4)
+        guard = permitted(max_attempts=MAX_SUPERVISED_AGENT_POST_ATTEMPTS)
+        for i in range(MAX_SUPERVISED_AGENT_POST_ATTEMPTS):
+            guard.begin_attempt()
+            guard.record_response(agent_data(0.08))
+            self.assertEqual(guard.attempts, i + 1)
+        self.assertEqual(guard.observed_cost_usd, "0.32")
+        with self.assertRaises(PerplexityBudgetUnavailable):
+            guard.begin_attempt()
+
+    def test_attempt_limit_cannot_be_arbitrarily_inflated(self):
+        for invalid in (None, "", 1, 3, 5, 10, True, 4.0, "4"):
+            with self.subTest(invalid=invalid), self.assertRaises(PerplexityBudgetUnavailable):
+                permitted(max_attempts=invalid)
+
+    def test_supervised_fourth_unknown_or_overbudget_cost_stops_before_fifth(self):
+        for mode in ("timeout", "overbudget"):
+            guard = permitted(
+                max_attempts=MAX_SUPERVISED_AGENT_POST_ATTEMPTS,
+                run_cap_usd="0.30",
+            )
+            for _ in range(3):
+                guard.begin_attempt()
+                guard.record_response(agent_data(0.05))
+            guard.begin_attempt()
+            if mode == "timeout":
+                guard.abandon_unknown_response()
+            else:
+                with self.assertRaises(PerplexityBudgetUnavailable):
+                    guard.record_response(agent_data(0.50))
+            with self.subTest(mode=mode), self.assertRaises(PerplexityBudgetUnavailable):
+                guard.begin_attempt()
 
     def test_abandoned_attempt_stops_all_future_research(self):
         guard = permitted()
