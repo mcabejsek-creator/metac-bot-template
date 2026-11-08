@@ -56,6 +56,15 @@
 - Added offline tests which explicitly configure `publish_reports_to_metaculus=True` while injecting a publication-runtime failure if ever touched, verifying that a zero-candidate inventory produces **zero publisher/journal/model calls**. Another test checks exactly one nonempty competition is dispatched.
 - This is a **local proposed-code property**, not proof of live publishing/remote checkpoint correctness; review gates remain in force.
 
+## Pre-POST deadline guard on the saved question snapshot (2026-11-08)
+
+- Additional review found a time-of-check/time-of-use gap: a question accepted as open by the bounded scanner might close during a long AI research/forecasting job before its forecast POST.
+- `SafePublicationMixin._drain_publication` now checks the **known** effective submission close time and open time immediately before claiming any **new forecast** step for outbound sending. It uses `question_context.utc_now()` (UTC), `effective_close()` (including authoritative `actual_close_time` when present), and both yes/no branches of conditional questions. If the known window is missing/expired/not-yet-open, it raises `PublicationUncertain` and leaves unclaimed journal steps untouched; no forecast POST is attempted.
+- A **confirmed forecast** is never resent. If only its comment remains to be delivered, the comment can be recovered even after the question closes, subject to normal frozen-plan and journal validation. All `sending`/`uncertain` steps still block replay and need explicit reconciliation.
+- Tests cover elapsed scheduled close, earlier authoritative actual close, conditional yes/no branch closing, and comment-only recovery after close. Three prior numeric/date/discrete publication fixtures were expanded to contain the open/close metadata real publishing requires rather than loosening the guard.
+- GitHub Actions offline run [42456898493](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42456898493) passed **308/308 tests**; offline guard reported zero unexpected live calls. The companion V2-binding check [42456898578](https://github.com/mcabejsek-creator/metac-bot-template/actions/runs/42456898578) passed on the same code commit.
+- **Important limit:** this guards a stale *locally known deadline*, not the question's *current server status*. Metaculus may alter/close the question after the original GET, and no additional live API call was authorized here. This is therefore a risk reduction, **not** a real-time publishability guarantee, nor a live POST/checkpoint demonstration.
+
 ## Remaining risks / REVIEW GATES
 1. Two empty pages is a defensive terminal heuristic grounded in the server's contiguous offset pagination, **not a mathematical proof** of absence under concurrent feed mutation. Track potential offset drift and consider a bounded repeat/consistency check if live observations demand it.
 2. Check the **actual authenticated Vrchcab list JSON schema** in an approved minimal read-only verification. Do not print private forecast values, question IDs/titles, credentials, or raw response bodies.
