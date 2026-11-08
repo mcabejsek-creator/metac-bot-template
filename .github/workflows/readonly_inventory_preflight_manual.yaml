@@ -10,13 +10,14 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: "Approval for up to 10 authenticated Metaculus GETs, no POST or LLM"
+        description: "Approve up to 10 Metaculus GETs: counts only, or explicitly one PUBLIC post ID"
         type: choice
         required: true
         default: "DO_NOT_RUN"
         options:
           - "DO_NOT_RUN"
           - "YES_READ_ONLY_MAX_TEN_GETS"
+          - "YES_FIND_ONE_PUBLIC_POST_ID"
       candidate_post_id:
         description: "Optional public post ID from a Metaculus question URL; not logged"
         type: string
@@ -33,7 +34,7 @@ concurrency:
 jobs:
   offline_safety:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1
+      github.event_name == 'workflow_dispatch' && (inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' || inputs.confirmation == 'YES_FIND_ONE_PUBLIC_POST_ID') && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -62,7 +63,7 @@ jobs:
 
   manual_get_only:
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' && github.run_attempt == 1
+      github.event_name == 'workflow_dispatch' && (inputs.confirmation == 'YES_READ_ONLY_MAX_TEN_GETS' || inputs.confirmation == 'YES_FIND_ONE_PUBLIC_POST_ID') && github.run_attempt == 1
     needs: offline_safety
     runs-on: ubuntu-latest
     timeout-minutes: 8
