@@ -150,6 +150,43 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         self.assertEqual(verified, [("synthetic-donated-9fc", "9fc")])
         self.assertIsNone(bot._automatic_perplexity_budget)
 
+    async def test_supervised_missing_wallet_approval_stops_before_paid_forecast(self):
+        from perplexity_run_budget import PerplexityBudgetUnavailable
+        a, _ = self.cases()
+        bot = self.bot()
+        scans = []
+        verified = []
+
+        def scan(client, tournament, *, read_page):
+            scans.append(tournament)
+            return [a] if tournament == 33121 else []
+
+        def funded(key, *, expected_suffix):
+            verified.append((key, expected_suffix))
+            return {"remaining_usd": "34.29481"}
+
+        async def forbidden(*args, **kwargs):
+            raise AssertionError("Missing operator wallet approval must not run models")
+
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament", scan))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", funded))
+        self.start_patch(patch.object(bot, "forecast_questions", forbidden))
+        self.start_patch(patch.dict("os.environ", {
+            "OPENROUTER_API_KEY": "synthetic-donated-9fc",
+            "METACULUS_SPONSORED_KEY_SUFFIX": "9fc",
+            "PERPLEXITY_MANUAL_RESEARCH_APPROVAL": "DO_NOT_RUN",
+            "PERPLEXITY_VERIFIED_BALANCE_USD": "",
+            "PERPLEXITY_VERIFIED_AT_UTC": "",
+            "PERPLEXITY_MAX_AUTO_RUN_USD": "",
+            "PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF": "NO",
+        }))
+        with self.assertRaises(PerplexityBudgetUnavailable):
+            await app.forecast_for_mode(bot, "tournament", first_live_post_id=90101)
+        self.assertEqual(scans, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
+        self.assertEqual(verified, [("synthetic-donated-9fc", "9fc")])
+
     async def test_missing_first_live_id_blocks_all_forecasts(self):
         a, b = self.cases()
         bot = self.bot()
@@ -177,7 +214,14 @@ class FirstLiveAtomicGuardTests(OfflineTestCase):
         self.assertIn("github.run_attempt == 1", source)
         self.assertIn('FIRST_LIVE_POST_ID: ${{ inputs.first_live_post_id }}', source)
         self.assertIn('--first-live-post-id "$FIRST_LIVE_POST_ID"', source)
-        self.assertNotIn("\n  schedule:", source)
+        self.assertNotIn("\\n  schedule:", source)
+        self.assertIn("inputs.research_approval == 'APPROVE_FOUR_AGENT_REQUESTS'", source)
+        self.assertIn("inputs.perplexity_auto_recharge_off == 'YES'", source)
+        self.assertIn("PERPLEXITY_MANUAL_RESEARCH_APPROVAL:", source)
+        self.assertIn("PERPLEXITY_VERIFIED_BALANCE_USD:", source)
+        self.assertIn("PERPLEXITY_VERIFIED_AT_UTC:", source)
+        self.assertIn("PERPLEXITY_MAX_AUTO_RUN_USD:", source)
+        self.assertIn("METACULUS_SPONSORED_KEY_SUFFIX:", source)
 
 
 if __name__ == "__main__":
