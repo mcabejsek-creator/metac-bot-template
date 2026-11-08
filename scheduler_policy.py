@@ -36,8 +36,6 @@ class DailySpendEvidence:
     complete: bool = False
 
 
-
-
 @dataclass(frozen=True)
 class DispatchSnapshot:
     now: datetime
