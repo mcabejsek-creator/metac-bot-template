@@ -40,10 +40,11 @@ from forecasting_tools import (
     clean_indents,
 )
 
+from forecasting_tools.data_models.questions import DiscreteQuestion
 from publication import SafePublicationMixin
 from runtime_limits import RuntimeLimitsMixin, cancellable_cli
 from research_safety import agent_research, validate_research_text
-from forecast_validation import ForecastValidationMixin, structure_output
+from forecast_validation import ForecastValidationMixin, structure_output, validate_question, ForecastValidationError
 from question_context import TARGET_PERIOD_NOTE, QuestionContextMixin, effective_close, measurement_context, utc_date
 from bounded_open_question_selection import (
     BoundedPostReader, deduplicate_tournaments, scan_open_tournament,
@@ -833,36 +834,51 @@ For differences, margins, spreads, or leads between two percentages or proportio
         )
 
 
-def select_first_live_binary_question(seasonal, minibench, post_id):
-    """Select exactly one never-forecasted binary question by PUBLIC post ID.
+FIRST_LIVE_ATOMIC_TYPES = {
+    BinaryQuestion: "binary",
+    MultipleChoiceQuestion: "multiple_choice",
+    NumericQuestion: "numeric",
+    DiscreteQuestion: "discrete",
+    DateQuestion: "date",
+}
 
-    Metaculus /questions/<post_id>/ URLs expose a post ID, not necessarily
-    the SDK's internal id_of_question. This check uses id_of_post, while the
-    normal publisher still writes forecasts to the verified id_of_question.
-    This is snapshot-only, NOT competition/publishing eligibility approval.
+
+def select_first_live_atomic_question(seasonal, minibench, post_id):
+    """Select exactly one validated atomic question by public Metaculus post ID.
+
+    Two complete, authenticated tournament inventories have already been read.
+    Group/conditional/unknown types and ambiguous IDs fail before any model,
+    publishing runtime, or journal access. This snapshot cannot prove that
+    the question remains open, history complete, or tournament eligible later.
     """
     if type(post_id) is not int or post_id <= 0:
         raise RuntimeError("First-live public post ID must be a positive integer")
     matches = [(label, q) for label, batch in (
-        ("seasonal", seasonal), ("minibench", minibench)
-    ) for q in batch if q.id_of_post == post_id]
+        ("seasonal", seasonal), ("minibench", minibench),
+    ) for q in batch if getattr(q, "id_of_post", None) == post_id]
     if len(matches) != 1:
         raise RuntimeError("First-live public post ID not uniquely present in validated inventory")
     label, question = matches[0]
-    if not isinstance(question, BinaryQuestion) or question.question_type != "binary":
-        raise RuntimeError("First-live mode requires one binary question, not groups/conditionals")
+    expected_type = FIRST_LIVE_ATOMIC_TYPES.get(type(question))
+    if expected_type is None or question.question_type != expected_type:
+        raise RuntimeError("First-live mode refuses grouped, conditional, or unknown question types")
     if question.already_forecasted is not False:
         raise RuntimeError("First-live mode refuses any previously forecasted question")
     if type(question.id_of_post) is not int or question.id_of_post != post_id:
         raise RuntimeError("First-live post ID changed")
     if type(question.id_of_question) is not int or question.id_of_question <= 0:
         raise RuntimeError("First-live internal question ID is invalid")
+    try:
+        validate_question(question, publishing=True)
+    except (ForecastValidationError, ValueError, TypeError, AttributeError) as error:
+        raise RuntimeError("First-live candidate failed publish-format validation") from None
     return ([question], []) if label == "seasonal" else ([], [question])
+
 
 async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None):
     """One run budget and event loop, including retrieval and both tournaments."""
     if first_live_post_id is not None and run_mode != "tournament":
-        raise RuntimeError("First-live binary restriction applies only to tournament mode")
+        raise RuntimeError("First-live single-post restriction applies only to tournament mode")
     async with template_bot.run_budget():
         client = MetaculusClient()
         if run_mode == "tournament":
@@ -884,7 +900,7 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None):
             if first_live_post_id is not None:
                 # Never select before BOTH inventories have safely completed.
                 # A missing, ineligible or already forecasted ID fails closed.
-                seasonal_questions, minibench_questions = select_first_live_binary_question(
+                seasonal_questions, minibench_questions = select_first_live_atomic_question(
                     seasonal_questions, minibench_questions, first_live_post_id,
                 )
             # Empty authenticated inventories are a safe no-op: do not even
@@ -932,7 +948,7 @@ if __name__ == "__main__":
         "--first-live-post-id",
         type=int,
         default=None,
-        help="Optional FIRST LIVE guard: publish at most one matching unforecasted binary public post ID",
+        help="Optional FIRST LIVE guard: allow one validated, unforecasted atomic question by public post ID",
     )
     args = parser.parse_args()
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
