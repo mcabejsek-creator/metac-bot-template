@@ -10,6 +10,7 @@ import urllib.error
 
 from .support import OfflineTestCase
 from .test_scheduler_policy import accepted
+from scheduler_policy import DailySpendEvidence
 from dispatch_intent_controller import (
     ControllerState, InvalidControlState, PendingIntent, propose_reservation,
     reserve_with_store, disable_controller,
@@ -26,9 +27,25 @@ APPROVED = ControllerState(enabled=True, approval_epoch=3)
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def daily_at(when=NOW):
+    return DailySpendEvidence(
+        day_utc=when.date(), checked_at=when,
+        charged_usd="0.10", approved_day_cap_usd="1.00",
+        approved_run_reserve_usd="0.40",
+        attempted_dispatches=1, max_daily_dispatches=2,
+        complete=True,
+    )
+
+
 def snapshot(**changes):
-    return accepted(now=NOW, github_status_checked_at=NOW,
-                    last_dispatch_at=NOW - timedelta(minutes=15), **changes)
+    values = {
+        "now": NOW,
+        "github_status_checked_at": NOW,
+        "last_dispatch_at": NOW - timedelta(minutes=15),
+        "daily_spend": daily_at(),
+    }
+    values.update(changes)
+    return accepted(**values)
 
 
 class FakeStore:
@@ -136,6 +153,15 @@ class ControllerIntentTests(OfflineTestCase):
                                 last_dispatch_at=NOW-timedelta(minutes=15),
                                 **change), approval_epoch=3).allowed)
 
+    def test_daily_quota_missing_denies_before_any_control_cas(self):
+        store = FakeStore()
+        attempt = reserve_with_store(
+            store, snapshot(daily_spend=None), approval_epoch=3,
+        )
+        self.assertFalse(attempt.allowed)
+        self.assertEqual(attempt.reason, "verified_daily_spend_unavailable")
+        self.assertEqual(store.calls, ["GET"])
+
     def test_valid_intent_is_pure_and_fixed_to_quarter_hour(self):
         result = propose_reservation(APPROVED, snapshot(), approval_epoch=3)
         self.assertTrue(result.allowed)
@@ -148,8 +174,9 @@ class ControllerIntentTests(OfflineTestCase):
 
     def test_reserved_or_uncertain_intent_always_blocks_replay(self):
         first = propose_reservation(APPROVED, snapshot(), approval_epoch=3)
-        at_next_tick = accepted(now=NOW+timedelta(minutes=16),
+        at_next_tick = snapshot(now=NOW+timedelta(minutes=16),
                                 github_status_checked_at=NOW+timedelta(minutes=16),
+                                daily_spend=daily_at(NOW+timedelta(minutes=16)),
                                 last_dispatch_at=NOW)
         result = propose_reservation(first.state, at_next_tick, approval_epoch=3)
         self.assertFalse(result.allowed)
@@ -158,8 +185,9 @@ class ControllerIntentTests(OfflineTestCase):
     def test_same_quarter_slot_replays_denied_even_if_no_pending(self):
         first = propose_reservation(APPROVED, snapshot(), approval_epoch=3)
         cleared = replace(first.state, pending=None)
-        later = accepted(now=NOW+timedelta(minutes=1),
+        later = snapshot(now=NOW+timedelta(minutes=1),
                          github_status_checked_at=NOW+timedelta(minutes=1),
+                         daily_spend=daily_at(NOW+timedelta(minutes=1)),
                          last_dispatch_at=None)
         result = propose_reservation(cleared, later, approval_epoch=3)
         self.assertFalse(result.allowed)
@@ -167,8 +195,9 @@ class ControllerIntentTests(OfflineTestCase):
     def test_persistent_spacing_uses_store_not_untrusted_caller(self):
         first = propose_reservation(APPROVED, snapshot(), approval_epoch=3)
         cleared = replace(first.state, pending=None)
-        later = accepted(now=NOW+timedelta(minutes=14),
+        later = snapshot(now=NOW+timedelta(minutes=14),
                          github_status_checked_at=NOW+timedelta(minutes=14),
+                         daily_spend=daily_at(NOW+timedelta(minutes=14)),
                          last_dispatch_at=None)
         self.assertFalse(propose_reservation(cleared, later, approval_epoch=3).allowed)
 

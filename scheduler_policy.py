@@ -7,10 +7,33 @@ switch and independently verify every claimed billing/run-state signal.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+import re
 
 POLL_INTERVAL = timedelta(minutes=15)
 STATUS_MAX_AGE = timedelta(minutes=5)
+SPEND_MAX_AGE = timedelta(minutes=5)
+_MONEY = re.compile(r"[0-9]+(?:\.[0-9]{1,6})?\Z")
+
+
+@dataclass(frozen=True)
+class DailySpendEvidence:
+    """Audited UTC-day costs AND durable number of attempted dispatches.
+
+    No component here fetches provider data or updates a durable ledger. A
+    future, separately authorized dispatcher must supply trustworthy evidence
+    including uncertain/possibly billed attempts. The run reserve is only a
+    conservative planning allowance; it is NOT a provider-enforced hard cap.
+    """
+    day_utc: date
+    checked_at: datetime
+    charged_usd: str
+    approved_day_cap_usd: str
+    approved_run_reserve_usd: str
+    attempted_dispatches: int
+    max_daily_dispatches: int
+    complete: bool = False
 
 
 @dataclass(frozen=True)
@@ -27,6 +50,7 @@ class DispatchSnapshot:
     perplexity_spend_guard_available: bool = False
     previous_publication_outcome_certain: bool = False
     first_attempt: bool = False
+    daily_spend: DailySpendEvidence | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +63,17 @@ def _utc_time(value):
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Scheduler times must be timezone aware")
     return value.astimezone(timezone.utc)
+
+
+def _money(value):
+    # Reject float approximation, booleans, exponents, missing and NaN.
+    if type(value) is not str or _MONEY.fullmatch(value) is None:
+        return None
+    try:
+        result = Decimal(value)
+    except InvalidOperation:
+        return None
+    return result if result.is_finite() else None
 
 
 def evaluate_dispatch(snapshot: DispatchSnapshot) -> DispatchDecision:
@@ -72,6 +107,36 @@ def evaluate_dispatch(snapshot: DispatchSnapshot) -> DispatchDecision:
     checked = _utc_time(snapshot.github_status_checked_at)
     if not timedelta(0) <= now - checked <= STATUS_MAX_AGE:
         return DispatchDecision(False, "github_status_stale")
+    budget = snapshot.daily_spend
+    if type(budget) is not DailySpendEvidence or budget.complete is not True:
+        return DispatchDecision(False, "verified_daily_spend_unavailable")
+    if type(budget.day_utc) is not date or budget.day_utc != now.date():
+        return DispatchDecision(False, "daily_spend_day_mismatch")
+    if (not isinstance(budget.checked_at, datetime)
+            or budget.checked_at.tzinfo is None
+            or budget.checked_at.utcoffset() is None):
+        return DispatchDecision(False, "daily_spend_snapshot_invalid")
+    confirmed_at = _utc_time(budget.checked_at)
+    if not timedelta(0) <= now - confirmed_at <= SPEND_MAX_AGE:
+        return DispatchDecision(False, "daily_spend_snapshot_stale")
+    if (type(budget.attempted_dispatches) is not int
+            or type(budget.max_daily_dispatches) is not int
+            or budget.attempted_dispatches < 0
+            or budget.max_daily_dispatches <= 0):
+        return DispatchDecision(False, "daily_dispatch_count_unverified")
+    if budget.attempted_dispatches >= budget.max_daily_dispatches:
+        return DispatchDecision(False, "daily_dispatch_quota_exhausted")
+    costs = tuple(_money(value) for value in (
+        budget.charged_usd, budget.approved_day_cap_usd,
+        budget.approved_run_reserve_usd,
+    ))
+    if any(amount is None for amount in costs):
+        return DispatchDecision(False, "daily_spend_values_invalid")
+    charged, cap, reserved = costs
+    if cap <= 0 or reserved <= 0 or charged < 0 or reserved > cap:
+        return DispatchDecision(False, "daily_spend_values_invalid")
+    if charged + reserved > cap:
+        return DispatchDecision(False, "daily_spend_allowance_exhausted")
     if snapshot.last_dispatch_at is not None:
         last = _utc_time(snapshot.last_dispatch_at)
         if not timedelta(0) <= now - last:
