@@ -15,7 +15,7 @@ on:
           - DO_NOT_RUN
           - APPROVE_ONE_LIVE_PUBLICATION_RUN
       first_live_post_id:
-        description: "Public Metaculus post ID of one binary question; requires separate approval"
+        description: "Public post ID of ONE validated atomic question; requires separate approval"
         type: string
         required: true
         default: DO_NOT_RUN
