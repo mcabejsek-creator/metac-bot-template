@@ -1,6 +1,6 @@
 """One-post authenticated Metaculus OWN forecast history, bounded GET only.
 
-Historical user-authorized first live forecast target: public post #46347.
+Only explicitly pre-approved public post IDs #46347 and #46335 are supported.
 No discovery or arbitrary post ID is accepted here. One authenticated GET,
 no POST, no model calls, no journal or GitHub writes, no fallback account.
 Even seeing a forecast does NOT settle all old history or old GitHub runs.
@@ -13,7 +13,8 @@ import json
 import urllib.error
 import urllib.request
 
-POST_ID = 46347
+POST_ID = 46347  # historical default used by the original offline tests
+ALLOWED_POST_IDS = frozenset((46347, 46335))  # exact already-approved live targets
 URL = f"https://www.metaculus.com/api/posts/{POST_ID}/"
 MAX_BYTES = 1_000_000
 
@@ -30,13 +31,15 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
 @dataclass(frozen=True)
 class PostHistoryEvidence:
     checked_at: datetime
+    public_post_id: int
     forecast_present_in_token_history: bool
     forecast_history_count: int
 
     def public_report(self):
         return {
             "mode": "one_post_bot_history_get_only",
-            "scope": "single_previously_authorized_first_live_post",
+            "scope": "single_previously_authorized_live_post",
+            "checked_public_post_id": self.public_post_id,
             "checked_at_utc": self.checked_at.isoformat().replace("+00:00", "Z"),
             "forecast_present_in_token_history": self.forecast_present_in_token_history,
             "observed_forecast_history_records": self.forecast_history_count,
@@ -54,7 +57,10 @@ class PostHistoryEvidence:
 class SinglePostHistoryReader:
     """Exact post GET; no retries or redirects; no other credentials accepted."""
 
-    def __init__(self, *, token, opener=None, clock=None):
+    def __init__(self, *, token, opener=None, clock=None, post_id=POST_ID):
+        if type(post_id) is not int or post_id not in ALLOWED_POST_IDS:
+            raise HistoryEvidenceUnavailable("Unapproved public post ID; no network request")
+        self._post_id = post_id
         if not isinstance(token, str) or not token or token.strip() != token:
             raise HistoryEvidenceUnavailable("Metaculus V2 token required")
         if any(ch.isspace() for ch in token):
@@ -65,7 +71,7 @@ class SinglePostHistoryReader:
 
     def read(self):
         req = urllib.request.Request(
-            URL,
+            f"https://www.metaculus.com/api/posts/{self._post_id}/",
             method="GET",
             headers={
                 "Authorization": "Token " + self._token,
@@ -88,7 +94,7 @@ class SinglePostHistoryReader:
             payload = json.loads(raw)
         except (ValueError, UnicodeError):
             raise HistoryEvidenceUnavailable("Invalid Metaculus history response") from None
-        if not isinstance(payload, dict) or type(payload.get("id")) is not int or payload["id"] != POST_ID:
+        if not isinstance(payload, dict) or type(payload.get("id")) is not int or payload["id"] != self._post_id:
             raise HistoryEvidenceUnavailable("Unexpected Metaculus post identity")
         # Official API may supply keys with null values for restricted fields.
         if any(payload.get(k) is not None for k in ("group_of_questions", "conditional", "notebook")):
@@ -115,6 +121,7 @@ class SinglePostHistoryReader:
             raise HistoryEvidenceUnavailable("Read-only audit timestamp unavailable")
         return PostHistoryEvidence(
             checked_at=now.astimezone(timezone.utc),
+            public_post_id=self._post_id,
             forecast_present_in_token_history=len(history) > 0,
             forecast_history_count=len(history),
         )

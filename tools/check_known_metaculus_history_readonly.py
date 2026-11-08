@@ -13,14 +13,21 @@ from metaculus_one_post_history_readonly import (
 )
 
 APPROVAL = "YES_ONE_HISTORY_GET"
+APPROVED_POST_IDS = frozenset(("46347", "46335"))
 
 
 def run(*, env=None, reader=None):
     vars = os.environ if env is None else env
     if vars.get("VRCHCAB_ONE_HISTORY_GET_APPROVAL") != APPROVAL:
         raise HistoryEvidenceUnavailable("Explicit single post history GET approval required")
+    selected = vars.get("VRCHCAB_ONE_HISTORY_POST_ID")
+    if type(selected) is not str or selected not in APPROVED_POST_IDS:
+        raise HistoryEvidenceUnavailable("Exact pre-approved public post ID required")
+    post_id = int(selected)
+    if reader is not None and getattr(reader, "_post_id", None) != post_id:
+        raise HistoryEvidenceUnavailable("Injected history reader ID mismatch")
     service = reader if reader is not None else SinglePostHistoryReader(
-        token=vars.get("METACULUS_TOKEN_V2"),
+        token=vars.get("METACULUS_TOKEN_V2"), post_id=post_id,
     )
     return service.read().public_report()
 
