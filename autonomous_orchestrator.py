@@ -18,7 +18,7 @@ from dispatch_intent_controller import (
     ControllerState, ReservationResult, InvalidControlState,
     propose_reservation, reserve_with_store, disable_controller,
 )
-from scheduler_policy import DispatchSnapshot, STATUS_MAX_AGE
+from scheduler_policy import DailySpendEvidence, DispatchSnapshot, STATUS_MAX_AGE
 
 
 class AutonomousPreflightRejected(RuntimeError):
@@ -43,6 +43,7 @@ class IndependentReadings:
     funded_openrouter_ok: bool = False
     perplexity_checked_at: datetime | None = None
     perplexity_spend_ok: bool = False
+    daily_spend: DailySpendEvidence | None = None
     journal_checked_at: datetime | None = None
     prior_publication_certain: bool = False
     operator_approval_confirmed: bool = False
@@ -78,6 +79,9 @@ def build_dispatch_snapshot(readings: IndependentReadings, *, now, last_dispatch
     github_time = _recent(readings.github_checked_at, instant, "GitHub run status")
     _recent(readings.funded_openrouter_checked_at, instant, "OpenRouter grant")
     _recent(readings.perplexity_checked_at, instant, "Perplexity spending approval")
+    if type(readings.daily_spend) is not DailySpendEvidence:
+        raise AutonomousPreflightRejected("Missing independently audited daily spend")
+    _recent(readings.daily_spend.checked_at, instant, "daily spend and attempt quota")
     _recent(readings.journal_checked_at, instant, "encrypted publication journal")
 
     if not all(type(x) is bool and x for x in (
@@ -107,6 +111,7 @@ def build_dispatch_snapshot(readings: IndependentReadings, *, now, last_dispatch
         perplexity_spend_guard_available=readings.perplexity_spend_ok,
         previous_publication_outcome_certain=readings.prior_publication_certain,
         first_attempt=readings.is_first_attempt,
+        daily_spend=readings.daily_spend,
     )
 
 
