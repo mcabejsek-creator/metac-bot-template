@@ -9,6 +9,7 @@ on:
       - "bounded_open_question_selection.py"
       - "tests/test_bounded_open_question_selection.py"
       - "tests/test_runtime_limits.py"
+      - "tests/test_github_publication.py"
       - "tools/preflight_tournament_inventory_readonly.py"
       - ".github/workflows/readonly_inventory_preflight_manual.yaml"
       - "docs/vrchcab_bounded_pagination_review_20261107.md"
