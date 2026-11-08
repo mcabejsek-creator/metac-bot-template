@@ -12,7 +12,7 @@ from .support import OfflineTestCase
 from .test_scheduler_policy import accepted
 from scheduler_policy import DailySpendEvidence
 from dispatch_intent_controller import (
-    ControllerState, InvalidControlState, PendingIntent, propose_reservation,
+    ControllerState, DailyQuota, InvalidControlState, PendingIntent, propose_reservation,
     reserve_with_store, disable_controller,
 )
 from github_control_store import (
@@ -23,7 +23,10 @@ from github_control_store import (
 
 NOW = datetime(2026, 11, 8, 12, 30, 0, tzinfo=timezone.utc)
 SHA = "a" * 40
-APPROVED = ControllerState(enabled=True, approval_epoch=3)
+APPROVED = ControllerState(
+    enabled=True, approval_epoch=3,
+    daily_quota=DailyQuota(day_utc=NOW.date().isoformat(), attempts=1, reserved_usd="0.40"),
+)
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -124,7 +127,7 @@ class ControllerIntentTests(OfflineTestCase):
     def test_strict_json_roundtrip_and_unknown_fields_denied(self):
         self.assertEqual(ControllerState.decode(ControllerState().encode()), ControllerState())
         broken = json.loads(ControllerState().encode())
-        for change in ({"unknown": True}, {"version": 2}, {"enabled": "false"},
+        for change in ({"unknown": True}, {"version": 1}, {"version": 3}, {"enabled": "false"},
                        {"approval_epoch": True}, {"last_slot": "2026-11-08T12:30:00Z"}):
             bad = {**broken, **change}
             with self.subTest(change=change), self.assertRaises(InvalidControlState):
@@ -161,6 +164,113 @@ class ControllerIntentTests(OfflineTestCase):
         self.assertFalse(attempt.allowed)
         self.assertEqual(attempt.reason, "verified_daily_spend_unavailable")
         self.assertEqual(store.calls, ["GET"])
+
+
+    def test_success_reserves_cost_and_attempt_atomically_with_intent(self):
+        before = APPROVED
+        outcome = propose_reservation(before, snapshot(), approval_epoch=3)
+        self.assertTrue(outcome.allowed)
+        self.assertIsNone(before.pending)
+        self.assertEqual(before.daily_quota.attempts, 1)
+        self.assertEqual(before.daily_quota.reserved_usd, "0.40")
+        self.assertEqual(outcome.state.daily_quota.attempts, 2)
+        self.assertEqual(outcome.state.daily_quota.reserved_usd, "0.80")
+        self.assertEqual(
+            ControllerState.decode(outcome.state.encode()).daily_quota,
+            outcome.state.daily_quota,
+        )
+
+    def test_missing_untrusted_or_stale_daily_quota_never_reserved(self):
+        cases = (
+            (replace(APPROVED, daily_quota=None), snapshot(), "durable_daily_quota_not_initialized"),
+            (replace(APPROVED, daily_quota=DailyQuota(
+                day_utc="2026-11-07", attempts=1, reserved_usd="0.40",
+            )), snapshot(), "durable_daily_quota_day_mismatch"),
+            (APPROVED, snapshot(daily_spend=replace(daily_at(), attempted_dispatches=0)),
+             "audited_and_durable_daily_counts_disagree"),
+        )
+        for state, snap, reason in cases:
+            with self.subTest(reason=reason):
+                proposal = propose_reservation(state, snap, approval_epoch=3)
+                self.assertFalse(proposal.allowed)
+                self.assertEqual(proposal.reason, reason)
+                self.assertIs(proposal.state, state)
+
+    def test_lifetime_of_reservations_not_reset_by_lower_provider_cost(self):
+        # The upstream snapshot alone would allow spending 0.30+0.40<=1.00,
+        # but our durable 0.75 reserve must force a denial.
+        state = replace(APPROVED, daily_quota=DailyQuota(
+            day_utc=NOW.date().isoformat(), attempts=1, reserved_usd="0.75",
+        ))
+        proposal = propose_reservation(
+            state, snapshot(daily_spend=replace(
+                daily_at(), charged_usd="0.30", approved_run_reserve_usd="0.40",
+            )), approval_epoch=3,
+        )
+        self.assertFalse(proposal.allowed)
+        self.assertEqual(proposal.reason, "durable_daily_budget_exhausted")
+
+    def test_observed_charge_higher_than_reserved_usd_also_blocks(self):
+        state = replace(APPROVED, daily_quota=DailyQuota(
+            day_utc=NOW.date().isoformat(), attempts=1, reserved_usd="0.20",
+        ))
+        proposal = propose_reservation(
+            state, snapshot(daily_spend=replace(
+                daily_at(), charged_usd="0.70", approved_run_reserve_usd="0.40",
+            )), approval_epoch=3,
+        )
+        self.assertEqual(proposal.reason, "daily_spend_allowance_exhausted")
+
+    def test_existing_day_count_and_ambiguous_cas_never_replay(self):
+        state = replace(APPROVED, daily_quota=DailyQuota(
+            day_utc=NOW.date().isoformat(), attempts=2, reserved_usd="0.80",
+        ))
+        denied = propose_reservation(
+            state, snapshot(daily_spend=replace(
+                daily_at(), attempted_dispatches=2,
+            )), approval_epoch=3,
+        )
+        self.assertFalse(denied.allowed)
+        self.assertEqual(denied.reason, "daily_dispatch_quota_exhausted")
+        store = FakeStore()
+        original = store.state.daily_quota
+        def conflict(_revision, _state):
+            store.calls.append("CAS-CONFLICT")
+            return False
+        store.compare_and_swap = conflict
+        rejected = reserve_with_store(store, snapshot(), approval_epoch=3)
+        self.assertFalse(rejected.allowed)
+        self.assertEqual(store.state.daily_quota, original)
+
+    def test_invalid_daily_state_and_old_version_fail_closed(self):
+        original = json.loads(APPROVED.encode())
+        for altered in (
+            {"version": 1},
+            {"daily_quota": None},
+            {"daily_quota": {"day_utc": "2026-11-08", "attempts": "1",
+                             "reserved_usd": "0.40"}},
+            {"daily_quota": {"day_utc": "2026-11-08", "attempts": True,
+                             "reserved_usd": "0.40"}},
+            {"daily_quota": {"day_utc": "2026-02-30", "attempts": 1,
+                             "reserved_usd": "0.40"}},
+            {"daily_quota": {"day_utc": "2026-11-08", "attempts": 1,
+                             "reserved_usd": "-1"}},
+            {"daily_quota": {"day_utc": "2026-11-08", "attempts": 1,
+                             "reserved_usd": "0.40", "extra": True}},
+        ):
+            with self.subTest(altered=altered):
+                payload = {**original, **altered}
+                if altered == {"daily_quota": None}:
+                    # Disabled state with no quota is safe, but an enabled
+                    # state must not be considered an approved dispatch.
+                    state = ControllerState.decode(json.dumps(payload))
+                    self.assertEqual(
+                        propose_reservation(state, snapshot(), approval_epoch=3).reason,
+                        "durable_daily_quota_not_initialized",
+                    )
+                else:
+                    with self.assertRaises(InvalidControlState):
+                        ControllerState.decode(json.dumps(payload))
 
     def test_valid_intent_is_pure_and_fixed_to_quarter_hour(self):
         result = propose_reservation(APPROVED, snapshot(), approval_epoch=3)
