@@ -19,6 +19,21 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         self.assertEqual(app.select_first_live_binary_question([a], [b], 70101), ([a], []))
         self.assertEqual(app.select_first_live_binary_question([a], [b], 70102), ([], [b]))
 
+    def test_manual_preflight_can_check_same_candidate_without_logging_its_id(self):
+        import json
+        from tools.preflight_tournament_inventory_readonly import _candidate_check
+        a, b = self.cases()
+        ready = _candidate_check([a], [b], 70101)
+        self.assertTrue(ready["present_once_in_validated_open_inventory"])
+        self.assertTrue(ready["binary_with_empty_token_forecast_history_in_snapshot"])
+        self.assertFalse(ready["historical_outcomes_fully_reconciled"])
+        self.assertFalse(ready["live_publication_authorized"])
+        self.assertNotIn("70101", json.dumps(ready))
+        prior = a.model_copy(update={"already_forecasted": True})
+        self.assertFalse(_candidate_check([prior], [b], 70101)["binary_with_empty_token_forecast_history_in_snapshot"])
+        self.assertFalse(_candidate_check([a], [a], 70101)["present_once_in_validated_open_inventory"])
+        self.assertFalse(_candidate_check([a], [b], 79999)["present_once_in_validated_open_inventory"])
+
     def test_missing_duplicate_and_invalid_ids_fail_closed(self):
         a, b = self.cases()
         for value, first, second in (
@@ -89,7 +104,7 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         self.assertIn("github.run_attempt == 1", source)
         self.assertIn('FIRST_LIVE_BINARY_ID: ${{ inputs.first_live_binary_id }}', source)
         self.assertIn('--first-live-binary-id "$FIRST_LIVE_BINARY_ID"', source)
-        self.assertNotIn("\\n  schedule:", source)
+        self.assertNotIn("\n  schedule:", source)
 
 
 if __name__ == "__main__":
