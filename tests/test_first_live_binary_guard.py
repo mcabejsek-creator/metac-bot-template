@@ -11,34 +11,34 @@ ROOT = Path(__file__).resolve().parents[1]
 class FirstLiveBinaryGuardTests(OfflineTestCase):
     def cases(self):
         base = question("japanese_diet")
-        return (base.model_copy(update={"id_of_question": 70101, "already_forecasted": False}),
-                base.model_copy(update={"id_of_question": 70102, "already_forecasted": False}))
+        return (base.model_copy(update={"id_of_question": 70101, "id_of_post": 90101, "already_forecasted": False}),
+                base.model_copy(update={"id_of_question": 70102, "id_of_post": 90102, "already_forecasted": False}))
 
     def test_exactly_one_selected_without_models_or_network(self):
         a, b = self.cases()
-        self.assertEqual(app.select_first_live_binary_question([a], [b], 70101), ([a], []))
-        self.assertEqual(app.select_first_live_binary_question([a], [b], 70102), ([], [b]))
+        self.assertEqual(app.select_first_live_binary_question([a], [b], 90101), ([a], []))
+        self.assertEqual(app.select_first_live_binary_question([a], [b], 90102), ([], [b]))
 
     def test_manual_preflight_can_check_same_candidate_without_logging_its_id(self):
         import json
         from tools.preflight_tournament_inventory_readonly import _candidate_check
         a, b = self.cases()
-        ready = _candidate_check([a], [b], 70101)
+        ready = _candidate_check([a], [b], 90101)
         self.assertTrue(ready["present_once_in_validated_open_inventory"])
         self.assertTrue(ready["binary_with_empty_token_forecast_history_in_snapshot"])
         self.assertFalse(ready["historical_outcomes_fully_reconciled"])
         self.assertFalse(ready["live_publication_authorized"])
-        self.assertNotIn("70101", json.dumps(ready))
+        self.assertNotIn("90101", json.dumps(ready))
         prior = a.model_copy(update={"already_forecasted": True})
-        self.assertFalse(_candidate_check([prior], [b], 70101)["binary_with_empty_token_forecast_history_in_snapshot"])
-        self.assertFalse(_candidate_check([a], [a], 70101)["present_once_in_validated_open_inventory"])
+        self.assertFalse(_candidate_check([prior], [b], 90101)["binary_with_empty_token_forecast_history_in_snapshot"])
+        self.assertFalse(_candidate_check([a], [a], 90101)["present_once_in_validated_open_inventory"])
         self.assertFalse(_candidate_check([a], [b], 79999)["present_once_in_validated_open_inventory"])
 
     def test_missing_duplicate_and_invalid_ids_fail_closed(self):
         a, b = self.cases()
         for value, first, second in (
-            (70103, [a], [b]), (70101, [a], [a]), (True, [a], [b]),
-            (0, [a], [b]), ("70101", [a], [b]),
+            (90103, [a], [b]), (90101, [a], [a]), (True, [a], [b]),
+            (0, [a], [b]), ("90101", [a], [b]),
         ):
             with self.subTest(value=value, count=len(first)+len(second)):
                 with self.assertRaises(RuntimeError):
@@ -52,7 +52,7 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         for candidate in (prior, malformed, different_type):
             with self.subTest(candidate=candidate):
                 with self.assertRaises(RuntimeError):
-                    app.select_first_live_binary_question([candidate], [], 70101)
+                    app.select_first_live_binary_question([candidate], [], 90101)
 
     async def test_two_scans_finish_before_single_forecast_and_others_untouched(self):
         a, b = self.cases()
@@ -73,7 +73,7 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         self.start_patch(patch.object(app, "scan_open_tournament", scan))
         self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
         self.start_patch(patch.object(bot, "forecast_questions", forecast))
-        result = await app.forecast_for_mode(bot, "tournament", first_live_binary_id=70102)
+        result = await app.forecast_for_mode(bot, "tournament", first_live_post_id=90102)
         self.assertEqual(result, [b])
         self.assertEqual(published_batches, [[b]])
 
@@ -92,18 +92,18 @@ class FirstLiveBinaryGuardTests(OfflineTestCase):
         self.start_patch(patch.object(bot, "forecast_questions",
                                       side_effect=AssertionError("Forecast must remain blocked")))
         with self.assertRaisesRegex(RuntimeError, "not uniquely present"):
-            await app.forecast_for_mode(bot, "tournament", first_live_binary_id=70103)
+            await app.forecast_for_mode(bot, "tournament", first_live_post_id=90103)
         self.assertEqual(scans, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
 
     def test_draft_tournament_workflow_requires_id_and_prior_approval(self):
         source = (ROOT / ".github/workflows/run_bot_on_tournament.yaml").read_text()
         self.assertIn("default: DO_NOT_RUN", source)
         self.assertIn("inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN'", source)
-        self.assertIn("inputs.first_live_binary_id != 'DO_NOT_RUN'", source)
-        self.assertIn("inputs.first_live_binary_id != ''", source)
+        self.assertIn("inputs.first_live_post_id != 'DO_NOT_RUN'", source)
+        self.assertIn("inputs.first_live_post_id != ''", source)
         self.assertIn("github.run_attempt == 1", source)
-        self.assertIn('FIRST_LIVE_BINARY_ID: ${{ inputs.first_live_binary_id }}', source)
-        self.assertIn('--first-live-binary-id "$FIRST_LIVE_BINARY_ID"', source)
+        self.assertIn('FIRST_LIVE_POST_ID: ${{ inputs.first_live_post_id }}', source)
+        self.assertIn('--first-live-post-id "$FIRST_LIVE_POST_ID"', source)
         self.assertNotIn("\n  schedule:", source)
 
 
