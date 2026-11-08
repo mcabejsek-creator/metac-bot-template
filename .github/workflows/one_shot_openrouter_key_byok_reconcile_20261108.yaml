@@ -1,0 +1,96 @@
+# Single approved GET-only diagnostic. No model, billing, Metaculus or other API writes.
+# Publishes ONLY three-character key comparison fingerprint and numeric usage counters.
+name: Vrchcab ONE-SHOT OpenRouter BYOK and key fingerprint check
+on:
+  push:
+    branches:
+      - ops/read-only-openrouter-key-20261108
+    paths:
+      - ".github/workflows/one_shot_openrouter_key_byok_reconcile_20261108.yaml"
+permissions:
+  contents: read
+concurrency:
+  group: vrchcab-single-byok-key-metadata-check-20261108
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/ops/read-only-openrouter-key-20261108' &&
+      github.repository == 'mcabejsek-creator/metac-bot-template' &&
+      github.event.head_commit.message == 'AUTHORIZE_READ_ONLY_OPENROUTER_BYOK_KEY_RECONCILE_ONCE_20261108' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GITHUB_TOKEN: ""
+      METACULUS_TOKEN: ""
+      METACULUS_TOKEN_V2: ""
+      PERPLEXITY_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - name: Read current OpenRouter key metadata once (no POST or models)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.request
+          import urllib.error
+
+          if os.environ.get("GITHUB_REPOSITORY") != "mcabejsek-creator/metac-bot-template":
+              sys.exit("WRONG_REPOSITORY_ABORT")
+          key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+          if not key.startswith("sk-or-") or len(key) < 25 or any(ch.isspace() for ch in key):
+              sys.exit("INVALID_KEY_FORMAT_ABORT")
+          class DenyRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+          opener = urllib.request.build_opener(DenyRedirect())
+          request = urllib.request.Request(
+              "https://openrouter.ai/api/v1/key", method="GET",
+              headers={"Authorization": "Bearer " + key, "Accept": "application/json",
+                       "User-Agent": "vrchcab-single-readonly-byok-check"})
+          try:
+              with opener.open(request, timeout=20) as response:
+                  if response.status != 200:
+                      raise RuntimeError("UNEXPECTED_HTTP_STATUS")
+                  blob = response.read(16001)
+                  if len(blob) > 16000:
+                      raise RuntimeError("OVERSIZE_RESPONSE")
+          except urllib.error.HTTPError as error:
+              print("OPENROUTER_STATUS=" + str(error.code))
+              sys.exit(1)
+          except (OSError, TimeoutError, RuntimeError):
+              print("OPENROUTER_ONE_GET_FAILED_NO_RETRY")
+              sys.exit(1)
+
+          try:
+              data = json.loads(blob)["data"]
+              if not isinstance(data, dict):
+                  raise TypeError()
+              # Three trailing characters are sufficient to match the masked
+              # UI fingerprint and are not a usable authentication credential.
+              print("OPENROUTER_KEY_LAST3=" + key[-3:])
+              label = data.get("label")
+              m = re.search(r"\.\.\.([A-Za-z0-9]{3,4})$", label) if isinstance(label, str) else None
+              print("OPENROUTER_MASKED_LABEL_LAST3=" + (m.group(1)[-3:] if m else "unavailable"))
+              print("OPENROUTER_LABEL_IS_MASKED=" + str(m is not None).lower())
+              for field in ("usage", "usage_daily", "usage_weekly", "usage_monthly",
+                            "byok_usage", "byok_usage_daily", "byok_usage_weekly",
+                            "byok_usage_monthly", "limit", "limit_remaining"):
+                  v = data.get(field)
+                  safe = format(v, ".5f") if type(v) in (int, float) and 0 <= v < 1000000 else "not_reported"
+                  print("OPENROUTER_" + field.upper() + "_USD=" + safe)
+              x = data.get("include_byok_in_limit")
+              print("OPENROUTER_INCLUDE_BYOK_IN_LIMIT=" + (str(x).lower() if type(x) is bool else "not_reported"))
+              print("OPENROUTER_LIMIT_RESET=" + (data.get("limit_reset") if data.get("limit_reset") in ("daily", "weekly", "monthly") else "none"))
+              print("OPENROUTER_READONLY_GET_COUNT=1")
+              print("MODEL_CALLS=0 METACULUS_POSTS=0 JOURNAL_WRITES=0")
+          except (TypeError, ValueError, KeyError):
+              print("OPENROUTER_PARSE_FAILED_NO_RETRY")
+              sys.exit(1)
+          PY
