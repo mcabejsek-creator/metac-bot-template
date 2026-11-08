@@ -35,8 +35,9 @@ class UnsafeAutomaticInventory(RuntimeError):
 def select_one_automatic_candidate(seasonal, minibench, *, now=None):
     """Return (at-most-one season question, at-most-one MiniBench question).
 
-    Prefer the eligible post closing soonest, but require a two-hour window
-    for at most 60 minutes of per-question work plus a 30-minute safety window. Ties are deterministic: seasonal
+    Prefer the eligible post closing soonest, but require a 90-minute window
+    for at most 60 minutes of per-question work plus a 30-minute safety window.
+    Ties are deterministic: seasonal
     first, then public post ID. Group/conditional posts are excluded even
     when the SDK exposes individual atomic group leaves.
 
