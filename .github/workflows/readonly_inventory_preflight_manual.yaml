@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 8
     env:
       METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
-      VRCHCAB_READONLY_PREFLIGHT_APPROVED: "YES_READ_ONLY_MAX_TEN_GETS"
+      VRCHCAB_READONLY_PREFLIGHT_APPROVED: ${{ inputs.confirmation }}
       VRCHCAB_CANDIDATE_POST_ID: ${{ inputs.candidate_post_id }}
       PERPLEXITY_API_KEY: ""
       OPENROUTER_API_KEY: ""
