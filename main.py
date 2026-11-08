@@ -853,11 +853,22 @@ async def forecast_for_mode(template_bot, run_mode):
             seasonal_questions, minibench_questions = deduplicate_tournaments(
                 seasonal_questions, minibench_questions,
             )
-            seasonal = await template_bot.forecast_questions(
-                seasonal_questions, return_exceptions=True,
+            # Empty authenticated inventories are a safe no-op: do not even
+            # initialize the remote publication journal or request model work.
+            # Keep the two-phase read-only scan above mandatory in all cases.
+            if not seasonal_questions and not minibench_questions:
+                return []
+            seasonal = (
+                await template_bot.forecast_questions(
+                    seasonal_questions, return_exceptions=True,
+                )
+                if seasonal_questions else []
             )
-            minibench = await template_bot.forecast_questions(
-                minibench_questions, return_exceptions=True,
+            minibench = (
+                await template_bot.forecast_questions(
+                    minibench_questions, return_exceptions=True,
+                )
+                if minibench_questions else []
             )
             return seasonal + minibench
         if run_mode == "metaculus_cup":
