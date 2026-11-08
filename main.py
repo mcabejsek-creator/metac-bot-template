@@ -934,19 +934,39 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                     expected_suffix=os.environ.get("METACULUS_SPONSORED_KEY_SUFFIX", ""),
                     _timeout=30,
                 )
-            seasonal = (
-                await template_bot.forecast_questions(
-                    seasonal_questions, return_exceptions=True,
+            if automatic_one:
+                # Future automation still cannot be called from the CLI.
+                # Operator attestation expires after 6h, preventing
+                # unattended paid research on unverified Perplexity balance.
+                import os
+                from perplexity_run_budget import PerplexityAutoRunBudget
+                template_bot._automatic_perplexity_budget = PerplexityAutoRunBudget(
+                    approved=(os.environ.get("PERPLEXITY_AUTO_RESEARCH_APPROVAL")
+                              == "APPROVE_TWO_AGENT_REQUESTS"),
+                    balance_usd=os.environ.get("PERPLEXITY_VERIFIED_BALANCE_USD"),
+                    verified_at=os.environ.get("PERPLEXITY_VERIFIED_AT_UTC"),
+                    run_cap_usd=os.environ.get("PERPLEXITY_MAX_AUTO_RUN_USD"),
+                    auto_recharge_confirmed_off=(
+                        os.environ.get("PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF") == "YES"
+                    ),
                 )
-                if seasonal_questions else []
-            )
-            minibench = (
-                await template_bot.forecast_questions(
-                    minibench_questions, return_exceptions=True,
+            try:
+                seasonal = (
+                    await template_bot.forecast_questions(
+                        seasonal_questions, return_exceptions=True,
+                    )
+                    if seasonal_questions else []
                 )
-                if minibench_questions else []
-            )
-            return seasonal + minibench
+                minibench = (
+                    await template_bot.forecast_questions(
+                        minibench_questions, return_exceptions=True,
+                    )
+                    if minibench_questions else []
+                )
+                return seasonal + minibench
+            finally:
+                if automatic_one:
+                    template_bot._automatic_perplexity_budget = None
         if run_mode == "metaculus_cup":
             template_bot.skip_previously_forecasted_questions = False
             return await template_bot.forecast_on_tournament(client.CURRENT_METACULUS_CUP_ID, return_exceptions=True)

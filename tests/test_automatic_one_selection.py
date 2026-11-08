@@ -122,7 +122,12 @@ class AutomaticOneSelectionTests(OfflineTestCase):
             verified.append((key.endswith("9fc"), expected_suffix))
             return {"remaining_usd": "34.29481"}
         self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", fake_credit_check))
+        from perplexity_run_budget import PerplexityAutoRunBudget
+        fake_budget = object()
+        self.start_patch(patch("perplexity_run_budget.PerplexityAutoRunBudget",
+                               return_value=fake_budget))
         result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+        self.assertIsNone(bot._automatic_perplexity_budget)
         self.assertEqual(verified, [(True, "9fc")])
         self.assertEqual(result, [early])
         self.assertEqual(submitted, [early])
