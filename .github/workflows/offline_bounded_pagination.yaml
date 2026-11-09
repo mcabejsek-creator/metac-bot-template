@@ -58,6 +58,9 @@ on:
       - "tools/audit_publication_journal_readonly.py"
       - ".github/workflows/readonly_inventory_preflight_manual.yaml"
       - "docs/vrchcab_bounded_pagination_review_20261107.md"
+      - "worker_claim_offline.py"
+      - "tests/test_worker_claim_offline.py"
+      - "docs/worker_claim_cas_offline_20261109.md"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
