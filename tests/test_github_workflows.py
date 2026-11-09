@@ -27,6 +27,26 @@ class ActionsConfigurationTests(OfflineTestCase):
                 self.assertNotIn("github.ref", workflow["concurrency"]["group"])
                 self.assertNotIn("github.run", workflow["concurrency"]["group"])
 
+    def test_readonly_backlog_hourly_workflow_cannot_publish(self):
+        workflow = self.workflows["readonly_backlog_hourly.yaml"]
+        self.assertEqual(set(workflow["on"]), {"schedule"})
+        self.assertEqual(workflow["on"]["schedule"], [{"cron": "13 * * * *"}])
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
+        job = workflow["jobs"]["read_only_backlog"]
+        self.assertIn("github.event_name == 'schedule'", job["if"])
+        self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        self.assertIn("github.run_attempt == 1", job["if"])
+        for key in ("PERPLEXITY_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ASKNEWS_API_KEY", "GITHUB_TOKEN"):
+            self.assertEqual(job["env"][key], "")
+        self.assertEqual(job["steps"][0]["with"]["persist-credentials"], "false")
+        real = job["steps"][-1]
+        self.assertEqual(real["run"], "poetry run python -B tools/preflight_tournament_inventory_readonly.py --run-scheduled-backlog-readonly")
+        self.assertEqual(real["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
+        self.assertEqual(real["env"]["VRCHCAB_SCHEDULED_BACKLOG_APPROVAL"], "APPROVE_RECURRING_READONLY_MAX_TEN_GETS")
+        self.assertNotIn("main.py", str(job))
+        self.assertIn(".github/workflows/readonly_backlog_hourly.yaml", self.workflows["offline_bounded_pagination.yaml"]["on"]["pull_request"]["paths"])
+
     def test_forecast_triggers_and_explicit_live_commands_are_preserved(self):
         expected = {
             "run_bot_on_tournament.yaml": ({"workflow_dispatch"}, '.venv/bin/python -B main.py --mode tournament --first-live-post-id "$FIRST_LIVE_POST_ID"'),
