@@ -70,6 +70,10 @@ on:
       - "docs/command_gateway_security_20261109.md"
       - "tests/fake_command_auth.py"
       - "tests/test_command_gateway_offline.py"
+      - "docs/durable_effect_recovery_20261109.md"
+      - "durable_effect_offline.py"
+      - "tests/fake_effect_recovery.py"
+      - "tests/test_durable_effect_offline.py"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
