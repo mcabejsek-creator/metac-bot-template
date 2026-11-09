@@ -273,15 +273,24 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--self-check", action="store_true")
     mode.add_argument("--run-approved-readonly", action="store_true")
+    mode.add_argument("--run-scheduled-backlog-readonly", action="store_true")
     args = parser.parse_args()
     if args.self_check:
         self_check()
         return
     # The real path runs only when invoked explicitly by the manual workflow.
     # No bypass via importing the module (main guard below).
+    scheduled = args.run_scheduled_backlog_readonly
     confirmation = os.getenv("VRCHCAB_READONLY_PREFLIGHT_APPROVED")
-    if confirmation not in ("YES_READ_ONLY_MAX_TEN_GETS", "YES_FIND_ONE_PUBLIC_POST_ID"):
-        print("Preflight stopped: explicit approval marker required", file=sys.stderr)
+    if scheduled:
+        if not (os.getenv("VRCHCAB_SCHEDULED_BACKLOG_APPROVAL") == "APPROVE_RECURRING_READONLY_MAX_TEN_GETS"
+                and os.getenv("GITHUB_EVENT_NAME") == "schedule"
+                and os.getenv("GITHUB_REF") == "refs/heads/main"
+                and os.getenv("GITHUB_RUN_ATTEMPT") == "1"):
+            print("Scheduled backlog denied: unapproved schedule context", file=sys.stderr)
+            sys.exit(2)
+    elif confirmation not in ("YES_READ_ONLY_MAX_TEN_GETS", "YES_FIND_ONE_PUBLIC_POST_ID"):
+        print("Preflight stopped: explicit manual approval marker required", file=sys.stderr)
         sys.exit(2)
     token = os.environ.get("METACULUS_TOKEN", "")
     if not token or len(token.strip()) < 32 or any(c.isspace() for c in token.strip()):
@@ -296,7 +305,7 @@ def main():
             if not raw_candidate.isascii() or not raw_candidate.isdecimal() or int(raw_candidate) <= 0:
                 raise IncompleteQuestionScan("Invalid candidate input")
             candidate_id = int(raw_candidate)
-        if confirmation == "YES_FIND_ONE_PUBLIC_POST_ID" and candidate_id is not None:
+        if (scheduled or confirmation == "YES_FIND_ONE_PUBLIC_POST_ID") and candidate_id is not None:
             raise IncompleteQuestionScan("Public preview cannot also inspect a supplied post")
         from forecasting_tools import MetaculusClient
         client = MetaculusClient(token=token.strip().removeprefix("Token ").strip())
@@ -304,7 +313,7 @@ def main():
         print("Starting approved GET-only, at-most-ten-request manual preflight", flush=True)
         report = inspect(
             client, reader, candidate_id=candidate_id,
-            preview_best_candidate=(confirmation == "YES_FIND_ONE_PUBLIC_POST_ID"),
+            preview_best_candidate=(scheduled or confirmation == "YES_FIND_ONE_PUBLIC_POST_ID"),
         )
         print(json.dumps(report, sort_keys=True), flush=True)
     except Exception:

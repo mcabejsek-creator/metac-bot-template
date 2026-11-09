@@ -57,6 +57,7 @@ on:
       - "tools/preflight_tournament_inventory_readonly.py"
       - "tools/audit_publication_journal_readonly.py"
       - ".github/workflows/readonly_inventory_preflight_manual.yaml"
+      - ".github/workflows/readonly_backlog_hourly.yaml"
       - "docs/vrchcab_bounded_pagination_review_20261107.md"
       - "worker_claim_offline.py"
       - "tests/test_worker_claim_offline.py"
