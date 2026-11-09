@@ -104,6 +104,24 @@ class ActionsConfigurationTests(OfflineTestCase):
                     seen.add(action)
         self.assertEqual(seen, set(reviewed))
 
+    def test_v3_admission_and_effect_only_edits_trigger_offline_ci(self):
+        # Future PRs may touch only these V3 modules; no silent CI bypass.
+        workflow = self.workflows["offline_bounded_pagination.yaml"]
+        monitored = workflow["on"]["pull_request"]["paths"]
+        expected = {
+            "reserve_bind_offline.py",
+            "create_effect_offline.py",
+            "tests/test_reserve_bind_offline.py",
+            "tests/test_create_effect_offline.py",
+            "docs/v3_reserve_bind_offline_20261109.md",
+            "docs/create_fixed_effect_offline_20261109.md",
+            "docs/v3_integration_after_pr41_20261109.md",
+        }
+        self.assertEqual(len(monitored), len(set(monitored)), "Duplicate path filters")
+        self.assertTrue(expected.issubset(set(monitored)), sorted(expected - set(monitored)))
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        self.assertNotIn("workflow_dispatch", workflow["on"])
+
     def test_publishing_job_budget_includes_supervisor_and_setup_margin(self):
         from runtime_limits import RuntimeLimits
         for name in self.publishers:
