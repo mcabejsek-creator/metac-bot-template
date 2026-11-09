@@ -69,8 +69,40 @@ class ActionsConfigurationTests(OfflineTestCase):
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
             steps = next(iter(self.workflows[name]["jobs"].values()))["steps"]
-            checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
+            checkout = next(step for step in steps
+                            if step.get("uses", "").partition("@")[0] == "actions/checkout")
             self.assertEqual(checkout["with"]["persist-credentials"], "false")
+
+    def test_all_active_actions_use_verified_official_commit_pins(self):
+        reviewed = {
+            "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",  # v4.4.0
+            "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",  # v5.6.0
+            "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",  # v4.6.2
+            "snok/install-poetry": "a783c322200f0519c7926aa6faa857c4e23e9263",  # v1.4.2
+        }
+
+        def references(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key == "uses":
+                        yield item
+                    else:
+                        yield from references(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from references(item)
+
+        seen = set()
+        for name, workflow in self.workflows.items():
+            for reference in references(workflow):
+                with self.subTest(workflow=name, action=reference):
+                    action, separator, revision = reference.partition("@")
+                    self.assertEqual(separator, "@")
+                    self.assertIn(action, reviewed)
+                    self.assertRegex(revision, r"^[0-9a-f]{40}$")
+                    self.assertEqual(revision, reviewed[action])
+                    seen.add(action)
+        self.assertEqual(seen, set(reviewed))
 
     def test_publishing_job_budget_includes_supervisor_and_setup_margin(self):
         from runtime_limits import RuntimeLimits
