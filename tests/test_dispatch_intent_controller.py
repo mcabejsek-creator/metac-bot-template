@@ -1,15 +1,14 @@
 """Synthetic tests: no live provider, GitHub, or publication traffic."""
 
-import base64
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
-import urllib.error
 
 from .support import OfflineTestCase
 from .test_scheduler_policy import accepted
+from .fake_github_control import FakeGitHub, Reply
 from scheduler_policy import DailySpendEvidence
 from dispatch_intent_controller import (
     ControllerState, DailyQuota, InvalidControlState, PendingIntent, propose_reservation,
@@ -68,52 +67,6 @@ class FakeStore:
         self.revision = "b" * 40
         self.state = new_state
         return True
-
-
-class Reply:
-    def __init__(self, body, status=200):
-        self.body = json.dumps(body).encode("utf-8")
-        self.status = status
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
-    def read(self, *_):
-        return self.body
-
-
-class FakeGitHub:
-    def __init__(self, initial=ControllerState()):
-        self.state = initial
-        self.calls = []
-        self.revision = SHA
-        self.next_status = None
-
-    def open(self, req, timeout):
-        self.calls.append((req.get_method(), req.full_url, timeout))
-        if self.next_status is not None:
-            code = self.next_status
-            self.next_status = None
-            raise urllib.error.HTTPError(req.full_url, code, "synthetic", {}, None)
-        if req.get_method() == "GET":
-            return Reply({
-                "type": "file",
-                "path": TARGET_PATH,
-                "sha": self.revision,
-                "encoding": "base64",
-                "content": base64.b64encode(self.state.encode().encode()).decode(),
-            })
-        if req.get_method() == "PUT":
-            payload = json.loads(req.data)
-            if payload["sha"] != self.revision or payload["branch"] != TARGET_BRANCH:
-                raise urllib.error.HTTPError(req.full_url, 409, "synthetic", {}, None)
-            self.state = ControllerState.decode(base64.b64decode(payload["content"]))
-            self.revision = "b" * 40
-            return Reply({"content": {"path": TARGET_PATH, "sha": self.revision}})
-        raise AssertionError("Unexpected outbound network operation")
 
 
 class ControllerIntentTests(OfflineTestCase):
@@ -351,7 +304,7 @@ class ControllerIntentTests(OfflineTestCase):
         store = GitHubContentsControlStore(token="OFFLINE_FAKE_TOKEN", opener=fake)
         state, rev = store.read()
         self.assertEqual(state, APPROVED)
-        self.assertEqual(rev, SHA)
+        self.assertEqual(rev, fake.revision)
         result = reserve_with_store(store, snapshot(), approval_epoch=3)
         self.assertTrue(result.allowed)
         self.assertEqual([v[0] for v in fake.calls], ["GET", "GET", "PUT"])
@@ -373,7 +326,7 @@ class ControllerIntentTests(OfflineTestCase):
         store = GitHubContentsControlStore(token="OFFLINE_FAKE_TOKEN", opener=fake)
         fake.next_status = None
         state, rev = store.read()
-        fake.revision = "c"*40
+        fake.replace_state(disable_controller(fake.state))
         self.assertFalse(store.compare_and_swap(rev, state))
         self.assertEqual([x[0] for x in fake.calls], ["GET", "PUT"])
 
