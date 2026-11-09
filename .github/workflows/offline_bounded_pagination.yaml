@@ -74,6 +74,13 @@ on:
       - "durable_effect_offline.py"
       - "tests/fake_effect_recovery.py"
       - "tests/test_durable_effect_offline.py"
+      - "reserve_bind_offline.py"
+      - "create_effect_offline.py"
+      - "tests/test_reserve_bind_offline.py"
+      - "tests/test_create_effect_offline.py"
+      - "docs/v3_reserve_bind_offline_20261109.md"
+      - "docs/create_fixed_effect_offline_20261109.md"
+      - "docs/v3_integration_after_pr41_20261109.md"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
