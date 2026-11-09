@@ -7,6 +7,7 @@ do not enforce these expressions. This engine belongs behind a future trusted
 command boundary; its Python checks do not prove that boundary is deployed.
 """
 
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 import re
@@ -17,10 +18,48 @@ from worker_claim_offline import OfflineControlStateV3
 
 MAX_GENERATION = 2**63 - 1
 MAX_WIRE_ITEM_BYTES = 4096  # Conservative bound; not DynamoDB's 400 KB limit.
+_ENVELOPE_FIELDS = frozenset(('command_schema', 'run_authorization', 'admission_schema',
+                              'reservation', 'recovery_schema', 'effect'))
 
 
 class StoreUnavailable(RuntimeError):
     """No authoritative observation; never initialize or fall back to a cache."""
+
+
+def _fence_envelope(request, present):
+    """Fence known newer schemas at the atomic write, not only at ACK decoding.
+
+    Server-internal request shaping. Unknown arbitrary top-level attributes
+    still require trusted writers/strict schema and fail-closed ACK validation.
+    """
+    result = deepcopy(request)
+    for field in sorted(_ENVELOPE_FIELDS - set(present)):
+        alias = '#shape_' + field
+        result['ExpressionAttributeNames'][alias] = field
+        result['ConditionExpression'] += ' AND attribute_not_exists(' + alias + ')'
+    return result
+
+
+def _pin_envelope(request, fields):
+    """A projection replaces absence ONLY with exact whole-value equality.
+
+    This is not a generic client endpoint or a way to disable schema checks.
+    Every consumed fence must exist and every field receives an atomic pin.
+    """
+    if not fields or set(fields) - _ENVELOPE_FIELDS:
+        raise StoreUnavailable('Known projected envelope fields required')
+    result = deepcopy(request)
+    clauses = result['ConditionExpression'].split(' AND ')
+    for field, value in fields.items():
+        alias, parameter = '#shape_' + field, ':shape_' + field
+        clause = 'attribute_not_exists(' + alias + ')'
+        if clause not in clauses or result['ExpressionAttributeNames'].get(alias) != field:
+            raise StoreUnavailable('Missing atomic schema fence')
+        clauses.remove(clause)
+        result['ExpressionAttributeValues'][parameter] = deepcopy(value)
+        clauses.append(alias + ' = ' + parameter)
+    result['ConditionExpression'] = ' AND '.join(clauses)
+    return result
 
 
 def _av(value):
@@ -208,10 +247,10 @@ class DynamoConditionalStorePrototype:
             after.item()  # Validate the entire resulting item and size before writing.
             names = {'#pk': 'pk', '#i': 'incarnation', '#g': 'generation', '#d': 'document',
                      '#v': 'version', '#on': 'enabled', '#e': 'approval_epoch'}
-            values = {':i': _av(self.binding.incarnation), ':g': _av(before.generation),
+            values = {':pk': _av(self.binding.partition_key), ':i': _av(self.binding.incarnation), ':g': _av(before.generation),
                       ':limit': _av(limit), ':one': _av(1), ':v': _av(3), ':on': _av(True),
                       ':e': _av(old.control.approval_epoch), ':before': _av(json.loads(old.encode()))}
-            condition = ('attribute_exists(#pk) AND #i = :i AND #g = :g AND #g < :limit '
+            condition = ('attribute_exists(#pk) AND #pk = :pk AND #i = :i AND #g = :g AND #g < :limit '
                          'AND #d.#v = :v AND #d.#on = :on AND #d.#e = :e AND #d = :before')
             if is_claim:
                 names.update({'#pending': 'pending', '#intent': 'intent_id', '#claim': 'worker_claim'})
@@ -226,6 +265,7 @@ class DynamoConditionalStorePrototype:
                            Key={'pk': _av(self.binding.partition_key)}, ConditionExpression=condition,
                            UpdateExpression=update, ExpressionAttributeNames=names,
                            ExpressionAttributeValues=values, ReturnValues='ALL_NEW')
+            request = _fence_envelope(request, {'pk', 'incarnation', 'generation', 'document'})
         except Exception:
             return WriteObservation(False, 'authoritative_state_unavailable', True)
         try:

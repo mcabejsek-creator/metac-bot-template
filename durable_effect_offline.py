@@ -232,6 +232,8 @@ class _RecoveryProjection:
         request['ExpressionAttributeValues'].update(
             {':rs': engine._av(RECOVERY_SCHEMA), ':effect': engine._av(asdict(self.effect))})
         request['ConditionExpression'] += ' AND #rs = :rs AND #effect = :effect'
+        request = engine._pin_envelope(request, {
+            'recovery_schema': engine._av(RECOVERY_SCHEMA), 'effect': engine._av(asdict(self.effect))})
         response = self.raw.update_item(**request)
         engine._ack(response)
         return {**response, 'Attributes': self._project(response.get('Attributes'))}
@@ -283,10 +285,11 @@ class _EffectStore:
         except Exception:
             return engine.WriteObservation(False, 'effect_precondition_unavailable', True), None
         try:
-            response = self.raw.update_item(TableName=self.binding.table_name,
+            request = dict(TableName=self.binding.table_name,
                 Key={'pk': engine._av(self.binding.partition_key)}, ConditionExpression=condition,
                 UpdateExpression='SET #f = :after, #g = #g + :one', ExpressionAttributeNames=names,
                 ExpressionAttributeValues=values, ReturnValues='ALL_NEW')
+            response = self.raw.update_item(**engine._fence_envelope(request, old))
             engine._ack(response)
             if RecoverySnapshot.decode(response.get('Attributes'), self.binding) != after or self.read() != after:
                 return engine.WriteObservation(False, 'effect_ack_or_readback_unverified', True), None

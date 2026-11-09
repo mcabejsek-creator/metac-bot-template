@@ -201,6 +201,9 @@ class _BoundTransport:
                                          else asdict(self._pinned.authorization))})
         forwarded['ConditionExpression'] += (
             ' AND #commandSchema = :commandSchema AND #authorization = :authorization')
+        forwarded = engine._pin_envelope(forwarded, {
+            'command_schema': engine._av(COMMAND_SCHEMA),
+            'run_authorization': forwarded['ExpressionAttributeValues'][':authorization']})
         response = self._raw.update_item(**forwarded)  # Exactly one raw write, never retry.
         engine._ack(response)
         after = self._decode(response.get('Attributes'))
