@@ -8,12 +8,15 @@ It composes independently obtained preflight readings with the dormant
 "Verified" flags here represent assertions from a future trusted reader,
 NOT independent proof of origin; a production reader/worker still needs an
 auditable provider-verified implementation and separate user authorization.
+The optional offline OIDC check authenticates only signed Actions context;
+production trust is absent and it never authorizes a worker launch.
 """
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
 import worker_configuration
+import worker_identity
 
 from dispatch_intent_controller import (
     ControllerState, ReservationResult, InvalidControlState,
@@ -183,7 +186,8 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
                                     approval_epoch=None,
                                     activation_confirmed=False,
                                     researcher=None,
-                                    research_reports_per_question=None):
+                                    research_reports_per_question=None,
+                                    worker_oidc_token=None):
     """Read-only admission preview for ONE atomic automatic-question worker.
 
     Unlike evaluate_offline_tick, this requires an ALREADY reserved intent.
@@ -201,6 +205,9 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
     source-controlled settings main uses. This does not attest which code,
     mode or configuration a remote worker would actually execute; absent
     that independent identity binding, the final decision remains DENY.
+    An optional signed OIDC token is checked only against controller-owned
+    policy/keys, never worker-selected trust or an identity boolean. Production
+    trust is not configured. Even a valid token cannot authorize execution.
     """
     if activation_confirmed is not True:
         return ControllerTick(False, "worker_activation_not_confirmed")
@@ -277,9 +284,16 @@ def evaluate_offline_worker_handoff(store, source, *, now, intent_id=None,
         return ControllerTick(False, "worker_control_state_changed_during_preflight")
     if worker_configuration.WORKER_CONFIG != config:
         return ControllerTick(False, "worker_configuration_changed_during_preflight")
+    if worker_oidc_token is not None:
+        try:
+            worker_identity.verify_controller_worker_token(worker_oidc_token, now=instant)
+        except worker_identity.WorkerIdentityRejected:
+            return ControllerTick(False, "worker_oidc_identity_unverified", intent_id)
     # Shared settings establish the source plan, not an approved artifact or
     # the identity of the actually executing worker. SHA/mode claims or local
-    # checkout metadata cannot supply that missing proof. Never approve here.
+    # checkout metadata cannot supply that missing proof. An authenticated
+    # Actions context cannot attest executed code/configuration either. No
+    # identity result/boolean is accepted as launch authority. Never approve.
     return ControllerTick(False, "worker_execution_identity_unverified", intent_id)
 
 
