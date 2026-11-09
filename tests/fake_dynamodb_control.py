@@ -92,6 +92,9 @@ class SyntheticDynamoTransport:
             return missing
 
         def condition(clause):
+            absent = re.fullmatch(r'attribute_not_exists\(([^)]+)\)', clause)
+            if absent:
+                return get(absent[1]) is missing
             exists = re.fullmatch(r'attribute_exists\(([^)]+)\)', clause)
             if exists:
                 return get(exists[1]) is not missing
