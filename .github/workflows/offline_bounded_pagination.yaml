@@ -61,6 +61,11 @@ on:
       - "worker_claim_offline.py"
       - "tests/test_worker_claim_offline.py"
       - "docs/worker_claim_cas_offline_20261109.md"
+      - "docs/transactional_cas_design_20261109.md"
+      - "dynamodb_cas_offline.py"
+      - "tests/fake_dynamodb_control.py"
+      - "tests/test_dynamodb_cas_offline.py"
+      - "tools/verify_dynamodb_sdk_offline.py"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
