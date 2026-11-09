@@ -66,6 +66,10 @@ on:
       - "tests/fake_dynamodb_control.py"
       - "tests/test_dynamodb_cas_offline.py"
       - "tools/verify_dynamodb_sdk_offline.py"
+      - "command_gateway_offline.py"
+      - "docs/command_gateway_security_20261109.md"
+      - "tests/fake_command_auth.py"
+      - "tests/test_command_gateway_offline.py"
       - ".github/workflows/offline_bounded_pagination.yaml"
 
 permissions:
