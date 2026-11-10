@@ -127,7 +127,11 @@ class ActionsConfigurationTests(OfflineTestCase):
                          "${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' "
                          "&& (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure') }}")
         self.assertEqual(followup["run"].strip(), "python -B tools/queue_next_automatic.py")
-        self.assertEqual(followup["env"], {"GITHUB_TOKEN": "${{ github.token }}"})
+        self.assertEqual(followup["env"], {
+            "GITHUB_TOKEN": "${{ github.token }}",
+            "VRCHCAB_BOT_OUTCOME": "${{ steps.bot.outcome }}",
+            "VRCHCAB_VERIFIED_FORECASTS": "${{ steps.bot.outputs.verified_forecasts || '0' }}",
+        })
         for secret in ("METACULUS_TOKEN", "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"):
             self.assertNotIn(secret, workflow.get("env", {}))
             self.assertNotIn(secret, job.get("env", {}))
@@ -215,31 +219,50 @@ class ActionsConfigurationTests(OfflineTestCase):
                 self.assertEqual(steps[checks]["run"], "poetry run python -B -m tests.run")
             self.assertNotIn("env", steps[checks])
 
-    def test_review_is_read_only_and_uses_its_existing_schedule(self):
+    def test_review_is_read_only_enabled_daily_and_bootstraps_on_main(self):
         workflow = self.workflows["review_bot.yaml"]
-        self.assertEqual(workflow["permissions"], {"contents": "read"})
-        self.assertEqual(workflow["on"]["schedule"], [{"cron": "0 6 * * 1"}])
+        self.assertEqual(workflow["permissions"], {"contents": "read", "actions": "read"})
+        self.assertEqual(set(workflow["on"]), {"schedule", "push", "workflow_dispatch"})
+        self.assertEqual(workflow["on"]["schedule"], [{"cron": "43 7 * * *"}])
+        self.assertEqual(workflow["on"]["push"]["branches"], ["main"])
+        expected_paths = {"resolved_forecast_review.py", "tests/test_resolved_forecast_review.py",
+                          "tools/review_bot_health.py", "tests/test_review_bot_health.py",
+                          ".github/workflows/review_bot.yaml"}
+        self.assertEqual(set(workflow["on"]["push"]["paths"]), expected_paths)
+        self.assertTrue(expected_paths.issubset(self.workflows["offline_bounded_pagination.yaml"]["on"]["pull_request"]["paths"]))
         self.assertNotIn("env", workflow)
         self.assertNotEqual(workflow["concurrency"]["group"], self.workflows[self.publishers[0]]["concurrency"]["group"])
+        job = workflow["jobs"]["review_job"]
+        self.assertNotIn("REVIEW_BOT_ENABLED", job["if"])
+        self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        self.assertIn("github.run_attempt == 1", job["if"])
+        self.assertEqual(job["timeout-minutes"], "10")
+        self.assertNotIn("env", job)
 
-    def test_review_input_cannot_inject_a_publisher_outside_the_shared_lock(self):
+    def test_review_only_passes_scoped_tokens_after_offline_checks_and_keeps_failure_summary(self):
         workflow = self.workflows["review_bot.yaml"]
-        step = next(step for step in workflow["jobs"]["review_job"]["steps"] if step.get("name") == "Review forecasts")
-        self.assertEqual(step["env"]["REVIEW_DAYS"], "${{ inputs.days || 30 }}")
-        self.assertNotIn("${{", step["run"])
-        self.assertIn('--resolved-since "$REVIEW_DAYS"', step["run"])
-        # Execute only the validation prefix, never the review command/API client.
-        validation = step["run"].split("poetry run", 1)[0]
-        marker = self.publication_store.path.parent / "must-not-exist"
-        for value in ("", "-1", "30; touch " + str(marker), "$(touch " + str(marker) + ")"):
-            result = subprocess.run(["/bin/bash", "-c", validation],
-                env={"REVIEW_DAYS": value}, capture_output=True, text=True, timeout=2)
-            self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(marker.exists())
-        for value in ("0", "30"):
-            result = subprocess.run(["/bin/bash", "-c", validation],
-                env={"REVIEW_DAYS": value}, capture_output=True, text=True, timeout=2)
-            self.assertEqual(result.returncode, 0)
+        steps = workflow["jobs"]["review_job"]["steps"]
+        checks = next(step for step in steps if step.get("id") == "offline_checks")
+        evaluation = next(step for step in steps if step.get("name") == "Review forecasts")
+        health = next(step for step in steps if step.get("name") == "Review automatic operation")
+        self.assertEqual(evaluation["run"], "python -B resolved_forecast_review.py --output resolved-review.json --summary resolved-review.md")
+        self.assertEqual(evaluation["env"], {"METACULUS_TOKEN": "${{ secrets.METACULUS_TOKEN_V2 }}"})
+        self.assertEqual(health["run"], "python -B tools/review_bot_health.py --output bot-health.json --summary bot-health.md")
+        self.assertEqual(health["env"], {"GITHUB_TOKEN": "${{ github.token }}"})
+        self.assertEqual(health["if"], "${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' }}")
+        self.assertEqual(steps[0]["with"]["persist-credentials"], "false")
+        self.assertLess(steps.index(checks), steps.index(evaluation))
+        self.assertLess(steps.index(checks), steps.index(health))
+        self.assertIn("test_resolved_forecast_review.py", checks["run"])
+        self.assertIn("test_review_bot_health.py", checks["run"])
+        self.assertNotIn("env", checks)
+        for step in steps:
+            self.assertNotIn("${{", step.get("run", ""))
+            if step not in (evaluation, health):
+                self.assertNotIn("env", step)
+        for step in steps[-2:]:
+            self.assertIn("always()", step["if"])
+            self.assertIn("steps.offline_checks.outcome == 'success'", step["if"])
 
     def test_initialization_is_explicit_manual_and_does_not_run_the_bot(self):
         workflow = self.workflows["initialize_publication_state.yaml"]

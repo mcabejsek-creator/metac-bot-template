@@ -2,11 +2,15 @@
 
 import copy
 import json
+from pathlib import Path
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
 
-from automatic_publication_verification import PublicationVerificationUnavailable, verify_published_question
+from automatic_publication_verification import (
+    PublicationVerificationUnavailable, record_verified_publication, verify_published_question,
+)
 
 
 class PublicationReadbackTests(unittest.TestCase):
@@ -82,6 +86,18 @@ class PublicationReadbackTests(unittest.TestCase):
         self.question.id_of_question = True
         with self.assertRaises(PublicationVerificationUnavailable): self.verify()
         self.assertEqual(self.calls, [])
+
+    def test_only_positive_readback_evidence_emits_fixed_success_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "outputs"
+            environ = {"GITHUB_ACTIONS": "true", "GITHUB_OUTPUT": str(path)}
+            for evidence in ({}, {"post_id": 1, "question_id": 2, "own_forecast_count": 0},
+                             {"post_id": True, "question_id": 2, "own_forecast_count": 1}):
+                with self.assertRaises(PublicationVerificationUnavailable):
+                    record_verified_publication(evidence, environ=environ)
+            self.assertFalse(path.exists())
+            record_verified_publication(self.verify(), environ=environ)
+            self.assertEqual(path.read_text(), "verified_forecasts=1\n")
 
 
 if __name__ == "__main__":

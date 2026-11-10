@@ -122,9 +122,12 @@ def queue_next(environ=None, *, api=None, now=None, sleep=time.sleep):
     moment = now()
     if started > moment + timedelta(seconds=30):
         raise QueueNextError("GitHub run start time is in the future")
-    # Deployment verifies the handoff immediately. All subsequent automatic
-    # passes wait until 15 minutes from their own start; waiting is bounded.
-    interval = 0 if environ["GITHUB_EVENT_NAME"] == "push" else INTERVAL_SECONDS
+    # Drain simultaneous MiniBench/season questions without an idle delay
+    # after a verified success. Empty/failed/uncertain passes retain the
+    # 15-minute cadence. Every successor still scans and selects at most one.
+    verified_success = (environ.get("VRCHCAB_BOT_OUTCOME") == "success"
+                        and environ.get("VRCHCAB_VERIFIED_FORECASTS") == "1")
+    interval = 0 if environ["GITHUB_EVENT_NAME"] == "push" or verified_success else INTERVAL_SECONDS
     remaining = min(INTERVAL_SECONDS, max(0, (started + timedelta(seconds=interval) - moment).total_seconds()))
     while remaining > 0:
         seconds = min(30, remaining)
@@ -153,7 +156,8 @@ def queue_next(environ=None, *, api=None, now=None, sleep=time.sleep):
     # never repeat this POST within the current run.
     api.dispatch()
     return {"status": "one_successor_requested", "workflow": WORKFLOW,
-            "ref": "main", "cadence_seconds": INTERVAL_SECONDS}
+            "ref": "main", "cadence_seconds": INTERVAL_SECONDS,
+            "immediate_after_verified_forecast": verified_success}
 
 
 def main():

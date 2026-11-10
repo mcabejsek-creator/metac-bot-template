@@ -5,6 +5,10 @@ name: Bounded pagination offline safety (no publishing)
 on:
   pull_request:
     paths:
+      - "automatic_model.py"
+      - "tests/test_automatic_model.py"
+      - "tools/smoke_automatic_model.py"
+      - ".github/workflows/automatic_model_smoke.yaml"
       - "main.py"
       - "fixed_search_research.py"
       - "automatic_publication_verification.py"
@@ -16,6 +20,11 @@ on:
       - "tests/test_bounded_run_cli.py"
       - "tests/test_github_workflows.py"
       - ".github/workflows/run_bot_automatic.yaml"
+      - ".github/workflows/review_bot.yaml"
+      - "resolved_forecast_review.py"
+      - "tests/test_resolved_forecast_review.py"
+      - "tools/review_bot_health.py"
+      - "tests/test_review_bot_health.py"
       - "tools/queue_next_automatic.py"
       - "tests/test_queue_next_automatic.py"
       - "automatic_one_selection.py"

@@ -1,65 +1,76 @@
-name: Review recent forecasts
+name: Review forecast quality and automatic operation
 
 # This workflow reads/rescores forecasts; it cannot modify the publication state.
 permissions:
   contents: read
+  actions: read
 
 on:
   workflow_dispatch:
-    inputs:
-      days:
-        description: "How many days back to look for resolved questions"
-        default: "30"
   schedule:
-    - cron: "0 6 * * 1" # weekly, Monday morning
+    - cron: "43 7 * * *" # daily, away from the busy start of the hour
+  push:
+    branches: [main]
+    paths:
+      - "resolved_forecast_review.py"
+      - "tests/test_resolved_forecast_review.py"
+      - "tools/review_bot_health.py"
+      - "tests/test_review_bot_health.py"
+      - ".github/workflows/review_bot.yaml"
 
-# Add concurrency group to prevent parallel runs
+# This read-only review never acquires the publisher's account-wide lock.
 concurrency:
-  group: ${{ github.workflow }}
+  group: vrchcab-review-${{ github.repository }}
   cancel-in-progress: false
 
-# Scores how the bot's resolved forecasts turned out. Read-only: it makes no
-# forecasts, spends nothing on LLMs, and publishes nothing.
-# The weekly run is off by default: set the repository variable REVIEW_BOT_ENABLED to
-# true to turn it on. Running it by hand always works.
+# No model calls or publication requests. Bounded real-data evaluation cannot
+# modify forecast configuration; proposed changes still require evidence and CI.
 jobs:
   review_job:
-    if: vars.REVIEW_BOT_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.repository == 'mcabejsek-creator/metac-bot-template' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - name: Install poetry
-        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1.4.2
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          installer-parallel: true
-      - name: Install dependencies
-        run: poetry install --no-interaction --no-root --with integrations
-      - name: Review forecasts
+      - name: Offline review regressions
+        id: offline_checks
         run: |
-          if [[ ! "$REVIEW_DAYS" =~ ^[0-9]+$ ]]; then
-            echo "Review days must be a non-negative integer." >&2
-            exit 1
-          fi
-          poetry run bot-review review \
-            --resolved-since "$REVIEW_DAYS" \
-            --output review.json \
-            --summary review.md
+          python -B -m unittest discover -s tests -p test_resolved_forecast_review.py
+          python -B -m unittest discover -s tests -p test_review_bot_health.py
+      - name: Review forecasts
+        run: python -B resolved_forecast_review.py --output resolved-review.json --summary resolved-review.md
         env:
-          REVIEW_DAYS: ${{ inputs.days || 30 }}
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+      - name: Review automatic operation
+        if: ${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' }}
+        run: python -B tools/review_bot_health.py --output bot-health.json --summary bot-health.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - name: Show the summary in the run page
-        run: cat review.md >> $GITHUB_STEP_SUMMARY
+        if: ${{ always() && steps.offline_checks.outcome == 'success' }}
+        run: |
+          for summary in resolved-review.md bot-health.md; do
+            if [ -f "$summary" ]; then cat "$summary" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
       - name: Keep the review
+        if: ${{ always() && steps.offline_checks.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: review
+          name: resolved-forecast-review
           path: |
-            review.json
-            review.md
+            resolved-review.json
+            resolved-review.md
+            bot-health.json
+            bot-health.md
           retention-days: 90
+

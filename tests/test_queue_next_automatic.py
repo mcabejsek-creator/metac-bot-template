@@ -69,6 +69,20 @@ class QueueNextTests(unittest.TestCase):
                 self.assertEqual(result["status"], "one_successor_requested")
                 self.assertEqual(result["cadence_seconds"], INTERVAL_SECONDS)
 
+    def test_only_verified_success_drains_the_backlog_without_idle_wait(self):
+        for outcome, count, expected_wait in (("success", "1", 0),
+                ("success", "0", 780), ("failure", "1", 780),
+                ("cancelled", "1", 780), ("success", "2", 780),
+                ("success", "true", 780)):
+            with self.subTest(outcome=outcome, count=count):
+                env, fake, waits = environment(), FakeGitHub(), []
+                env.update(VRCHCAB_BOT_OUTCOME=outcome, VRCHCAB_VERIFIED_FORECASTS=count)
+                result = queue_next(env, api=fake,
+                    now=lambda: NOW + timedelta(seconds=120), sleep=waits.append)
+                self.assertEqual(sum(waits), expected_wait)
+                self.assertEqual(fake.posts, 1)
+                self.assertEqual(result["immediate_after_verified_forecast"], expected_wait == 0)
+
     def test_newer_same_workflow_first_main_run_takes_over(self):
         for state in ("queued", "in_progress", "pending"):
             fake = FakeGitHub(newer=[record(id=201, status=state)])
