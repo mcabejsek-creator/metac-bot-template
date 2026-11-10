@@ -297,7 +297,13 @@ async def structure_output(*args, question, **kwargs):
     async def invoke(prompt, *invoke_args, **invoke_kwargs):
         prompt = slots.restore(prompt) + "\n\n" + packet
         text = await model.invoke(prompt, *invoke_args, **invoke_kwargs)
-        raw_parser_prediction(question, output_type, parser_json(text))
+        data = parser_json(text)
+        raw_parser_prediction(question, output_type, data)
+        if output_type is PredictedOptionList:
+            # Compare validated labelled probabilities, independent of parser order.
+            by_name = {option["option_name"]: option for option in data["predicted_options"]}
+            data["predicted_options"] = [by_name[name] for name in question.options]
+            return json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         return text
 
     guarded.invoke = invoke
@@ -436,3 +442,4 @@ def validate_plan(question, report, operations):
         require(comment["kind"] == "comment" and comment["post_id"] == target.id_of_post
                 and comment["text"] == report.explanation and comment["is_private"] is True
                 and comment["included_forecast"] is True, "Comment differs from the SDK report publication contract")
+

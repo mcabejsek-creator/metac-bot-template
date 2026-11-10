@@ -8,6 +8,8 @@ on:
       - "main.py"
       - "fixed_search_research.py"
       - "automatic_publication_verification.py"
+      - "forecast_validation.py"
+      - "tests/test_forecast_validation.py"
       - "tests/test_automatic_publication_verification.py"
       - "tests/test_fixed_search_research.py"
       - "bounded_run.py"
