@@ -24,7 +24,10 @@ class ActionsConfigurationTests(OfflineTestCase):
                 self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
                 self.assertEqual(workflow["env"], reference["env"])
                 self.assertEqual(workflow["env"]["METACULUS_PUBLICATION_BACKEND"], "github")
-                self.assertEqual(workflow["permissions"], {"contents": "write"})
+                expected_permissions = {"contents": "write"}
+                if name == "run_bot_automatic.yaml":
+                    expected_permissions["actions"] = "write"
+                self.assertEqual(workflow["permissions"], expected_permissions)
                 self.assertNotIn("github.ref", workflow["concurrency"]["group"])
                 self.assertNotIn("github.run", workflow["concurrency"]["group"])
 
@@ -106,6 +109,29 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertNotIn("PERPLEXITY_VERIFIED_AT_UTC", step["env"])
         self.assertNotIn("PERPLEXITY_MANUAL_RESEARCH_APPROVAL", step["env"])
 
+    def test_next_automatic_pass_requires_completed_checked_bot_without_model_secrets(self):
+        workflow = self.workflows["run_bot_automatic.yaml"]
+        self.assertEqual(workflow["permissions"], {"contents": "write", "actions": "write"})
+        job = workflow["jobs"]["forecast_job"]
+        steps = job["steps"]
+        checks = next(step for step in steps if step.get("id") == "offline_checks")
+        bot = next(step for step in steps if step.get("id") == "bot")
+        followup = steps[-1]
+        self.assertEqual(checks["name"], "Offline publication regressions")
+        self.assertIn("tests.test_queue_next_automatic", checks["run"])
+        self.assertEqual(bot["name"], "Run bot")
+        self.assertLess(steps.index(checks), steps.index(bot))
+        self.assertLess(steps.index(bot), len(steps) - 1)
+        self.assertEqual(followup["name"], "Queue next automatic pass")
+        self.assertEqual(" ".join(followup["if"].split()),
+                         "${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' "
+                         "&& (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure') }}")
+        self.assertEqual(followup["run"].strip(), "python -B tools/queue_next_automatic.py")
+        self.assertEqual(followup["env"], {"GITHUB_TOKEN": "${{ github.token }}"})
+        for secret in ("METACULUS_TOKEN", "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"):
+            self.assertNotIn(secret, workflow.get("env", {}))
+            self.assertNotIn(secret, job.get("env", {}))
+
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
             steps = next(iter(self.workflows[name]["jobs"].values()))["steps"]
@@ -182,7 +208,8 @@ class ActionsConfigurationTests(OfflineTestCase):
             if name == "run_bot_automatic.yaml":
                 self.assertTrue(steps[checks]["run"].startswith("poetry run python -B -m unittest "))
                 for module in ("tests.test_automatic_one_selection", "tests.test_fixed_search_research",
-                               "tests.test_github_publication", "tests.test_publication_recovery"):
+                               "tests.test_github_publication", "tests.test_publication_recovery",
+                               "tests.test_queue_next_automatic"):
                     self.assertIn(module, steps[checks]["run"])
             else:
                 self.assertEqual(steps[checks]["run"], "poetry run python -B -m tests.run")

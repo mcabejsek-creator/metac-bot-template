@@ -14,6 +14,8 @@ on:
       - "tests/test_bounded_run_cli.py"
       - "tests/test_github_workflows.py"
       - ".github/workflows/run_bot_automatic.yaml"
+      - "tools/queue_next_automatic.py"
+      - "tests/test_queue_next_automatic.py"
       - "automatic_one_selection.py"
       - "manual_next_candidate_preview.py"
       - "tests/test_manual_next_candidate_preview.py"
