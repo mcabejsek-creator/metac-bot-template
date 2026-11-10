@@ -80,12 +80,14 @@ class AutomaticOneSelectionTests(OfflineTestCase):
 
     def test_automatic_bot_uses_fixed_search_with_one_report_and_three_forecasts(self):
         bot = app.build_template_bot(automatic_one=True)
+        self.assertEqual(bot.get_llm("default", "llm").model, "openrouter/openai/gpt-4.1")
         self.assertEqual(bot.research_reports_per_question, 1)
         self.assertEqual(bot.predictions_per_research_report, 3)
         self.assertEqual(bot.get_llm("researcher"), "perplexity-search")
         self.assertTrue(bot.publish_reports_to_metaculus)
         self.assertTrue(bot.skip_previously_forecasted_questions)
         manual = app.build_template_bot(automatic_one=False)
+        self.assertEqual(manual.get_llm("default", "llm").model, "openrouter/openai/gpt-4o")
         self.assertEqual(manual.research_reports_per_question, 2)
         self.assertEqual(manual.get_llm("researcher"), "perplexity-agent")
 
