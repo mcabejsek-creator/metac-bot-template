@@ -55,7 +55,7 @@ async def run():
     print("AUTOMATIC_MODEL_SMOKE " + json.dumps({
         "status": "passed", "model": AUTOMATIC_MODEL_ID,
         "version": AUTOMATIC_MODEL_VERSION,
-        "synthetic_model_requests": 1, "metaculus_requests": 0,
+        "model_invocations": 1, "metaculus_requests": 0,
         "perplexity_requests": 0,
         "elapsed_seconds": round(time.monotonic() - started, 2),
         "forecast_accuracy_measured": False,

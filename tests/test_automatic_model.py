@@ -14,13 +14,13 @@ class AutomaticModelTests(unittest.TestCase):
         with patch.object(automatic_model, "GeneralLlm", return_value=sentinel.model) as sdk:
             self.assertIs(automatic_model.build_automatic_model(), sentinel.model)
         sdk.assert_called_once_with(
-            model="openrouter/google/gemini-3.7-flash",
-            temperature=None,
-            timeout=180,
+            model="openrouter/openai/gpt-4.1",
+            temperature=0.3,
+            timeout=90,
             allowed_tries=1,
-            max_tokens=16_384,
+            max_tokens=8_192,
         )
-        self.assertEqual(automatic_model.AUTOMATIC_MODEL_VERSION, "vrchcab-gemini37-v1")
+        self.assertEqual(automatic_model.AUTOMATIC_MODEL_VERSION, "vrchcab-gpt41-v1")
 
     def test_locked_sdk_keeps_completion_cap_in_openrouter_request(self):
         model = automatic_model.build_automatic_model()
@@ -29,27 +29,27 @@ class AutomaticModelTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", kwargs)
         self.assertNotIn("api_key", kwargs)
         self.assertNotIn("fallbacks", kwargs)
-        self.assertEqual(kwargs["max_tokens"], 16_384)
+        self.assertEqual(kwargs["max_tokens"], 8_192)
 
         # Exercise LiteLLM's actual offline parameter mapping and request
         # construction, even with an unknown model in its older local catalog.
         # No completion or HTTP transport is called.
         with patch("litellm.supports_reasoning", return_value=False):
             optional = get_optional_params(
-                model="google/gemini-3.7-flash",
+                model="openai/gpt-4.1",
                 custom_llm_provider="openrouter",
                 max_tokens=kwargs["max_tokens"],
                 temperature=kwargs["temperature"],
                 drop_params=True,
             )
             body = OpenrouterConfig().transform_request(
-                model="google/gemini-3.7-flash",
+                model="openai/gpt-4.1",
                 messages=[{"role": "user", "content": "Synthetic offline request."}],
                 optional_params=optional,
                 litellm_params={},
                 headers={},
             )
-        self.assertEqual(body["max_tokens"], 16_384)
+        self.assertEqual(body["max_tokens"], 8_192)
         self.assertNotIn("reasoning_effort", body)
         self.assertNotIn("models", body)
 
