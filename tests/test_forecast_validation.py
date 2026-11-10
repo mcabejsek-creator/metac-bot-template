@@ -142,6 +142,20 @@ class RawForecastTests(ValidationCase):
                   "percentage": "_numeric_prompt_to_forecast", "date": "_date_prompt_to_forecast"}[case]
         return await getattr(self.bot(), method)(q or identified(case), "Local reasoning")
 
+    def parser_samples(self, *samples):
+        calls, parser_calls = [], []
+
+        async def invoke(model, prompt, *args, **kwargs):
+            calls.append(str(prompt))
+            if "You are a data analyst" in str(prompt):
+                sample = samples[len(parser_calls) % len(samples)]
+                parser_calls.append(sample)
+                return json.dumps(sample)
+            return "Synthetic multiple-choice reasoning."
+
+        self.start_patch(patch.object(app.GeneralLlm, "invoke", invoke))
+        return calls, parser_calls
+
     async def test_binary_edges_preserve_existing_clamp(self):
         for value, expected in ((0, .01), (.001, .01), (.65, .65), (.999, .99), (1, .99)):
             with self.subTest(value=value):
@@ -167,6 +181,39 @@ class RawForecastTests(ValidationCase):
         options[0]["option_name"] += " "
         with self.assertRaises(ValueError):
             await self.parse("fda", {"predicted_options": options})
+
+    async def test_multiple_choice_samples_with_different_order_agree_without_extra_calls(self):
+        q = identified("fda")
+        options = [{"option_name": name, "probability": p} for name, p in zip(q.options, (.3, .5, .2))]
+        calls, parser_calls = self.parser_samples(
+            {"predicted_options": list(reversed(options))},
+            {"predicted_options": options[1:] + options[:1]},
+        )
+        result = await self.bot()._multiple_choice_prompt_to_forecast(q, "Local reasoning")
+        probabilities = result.prediction_value.to_dict()
+        self.assertEqual(list(probabilities), q.options)
+        self.assertEqual(probabilities, {item["option_name"]: item["probability"] for item in options})
+        self.assertEqual(len(parser_calls), 2)
+        self.assertEqual(len(calls), 3)  # One forecast and the existing two parser samples.
+
+    async def test_multiple_choice_reordered_samples_with_different_probabilities_still_disagree(self):
+        q = identified("fda")
+        options = [{"option_name": name, "probability": p} for name, p in zip(q.options, (.3, .5, .2))]
+        changed = [{"option_name": name, "probability": p} for name, p in zip(q.options, (.4, .4, .2))]
+        self.parser_samples({"predicted_options": options}, {"predicted_options": list(reversed(changed))})
+        with self.assertRaisesRegex(ValueError, "Sampled outputs.*not the same"):
+            await self.bot()._multiple_choice_prompt_to_forecast(q, "Local reasoning")
+
+    async def test_multiple_choice_canonicalization_rejects_duplicate_missing_and_unknown_labels(self):
+        q = identified("fda")
+        options = [{"option_name": name, "probability": p} for name, p in zip(q.options, (.3, .5, .2))]
+        duplicate = copy.deepcopy(options)
+        duplicate[1]["option_name"] = duplicate[0]["option_name"]
+        unknown = copy.deepcopy(options)
+        unknown[1]["option_name"] = "Unknown option"
+        for malformed in (duplicate, options[:-1], unknown):
+            with self.subTest(options=malformed), self.assertRaises(ValueError):
+                await self.parse("fda", {"predicted_options": list(reversed(malformed))}, q)
 
     async def test_multiple_choice_probability_types_ranges_and_sum(self):
         for probabilities in ((True, 0, 0), ("0.3", .5, .2), (-.1, .7, .4), (1.1, 0, 0),
@@ -482,3 +529,4 @@ class FullNumericPipelineTests(ValidationCase):
 
     async def test_date_pipeline_and_idempotent_restore(self):
         await self.pipeline("date")
+
