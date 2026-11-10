@@ -317,7 +317,7 @@ This question's outcome will be determined by the specific criteria below:
             {question.background_info}
 
 
-            This question's outcome will be determined by the specific criteria below. These criteria have not yet been satisfied:
+            This question's outcome will be determined by the specific criteria below:
             {question.resolution_criteria}
 
             {question.fine_print}
@@ -334,13 +334,15 @@ This question's outcome will be determined by the specific criteria below:
 - Days until close: {(self._get_effective_close_time(question).date() - now.date()).days if self._get_effective_close_time(question) else "unknown"}
 - Days until scheduled resolution: {(utc_date(question.scheduled_resolution_time).date() - now.date()).days if question.scheduled_resolution_time else "unknown"}
 
-Treat these timing values as authoritative. Do not confuse the close time with the scheduled resolution time.
-The close time is only the deadline for submitting forecasts and is not evidence about whether the real-world outcome can still occur, unless the resolution criteria explicitly tie the outcome to the close time. Never use zero or expired days until close as evidence for Yes or No; assess the remaining opportunity using the scheduled resolution time or the actual deadline stated in the resolution criteria.
+{TARGET_PERIOD_NOTE}
+Treat these timing values as authoritative metadata, with separate roles. The close time is the deadline for submitting forecasts. The scheduled resolution time is the expected time for adjudicating the question. Neither defines the real-world event window unless the question text, resolution criteria or fine print explicitly says so.
+Determine the qualifying event window and its deadline from the question text, resolution criteria and fine print. A later scheduled resolution time does not extend that event window. If no event deadline is stated, preserve that uncertainty rather than inventing one from the submission or adjudication schedule. Never use zero or expired days until close as evidence for Yes or No.
+An open or unresolved question on Metaculus does not establish whether the real-world event has already occurred. Check the supplied research against the criteria: if qualifying events have already occurred within the required window, account for them instead of assuming the criteria remain unsatisfied or requiring those events to happen again. Preserve any uncertainty in that evidence and any remaining requirements in the criteria or fine print.
             First, explicitly determine from the question and resolution criteria what a Yes outcome means and what a No outcome means. Do not reverse these labels based on which candidate, side, or outcome is currently leading. Before assigning probabilities, verify that every Yes scenario actually satisfies the Yes resolution criteria and every No scenario does not.
             Do not add any motive, purpose, threshold, exclusion, or other requirement that is not explicitly present in the resolution criteria or fine print. Treat the fine print as binding.
             Strictly distinguish resolution requirements from real-world causal, political, legal, or procedural conditions. Such conditions may affect the probability of the outcome, but they are not requirements for resolution unless the resolution criteria or fine print explicitly make them so.
             Before answering you write:
-            (a) State the exact authoritative number of days remaining until close and until scheduled resolution using the values provided above. Do not convert these values into months or years, and do not recalculate the interval independently.
+            (a) State the actual qualifying event window and deadline separately from the submission and adjudication schedule. Report the supplied days-until-close and days-until-scheduled-resolution values as metadata, without treating them as the remaining real-world opportunity.
             (b) The status quo outcome if nothing changed.
             (c) A brief description of a scenario that results in a No outcome.
             (d) A brief description of a scenario that results in a Yes outcome.
@@ -988,12 +990,17 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                 seasonal_questions, minibench_questions = select_one_automatic_candidate(
                     seasonal_questions, minibench_questions,
                 )
-            # Empty authenticated inventories are a safe no-op: do not even
-            # initialize the remote publication journal or request model work.
-            # Keep the two-phase read-only scan above mandatory in all cases.
+            # No new candidate means no paid/model work. On automatic idle
+            # passes only, finish at most one frozen comment whose forecast
+            # was positively confirmed, including on already-closed questions.
+            # Both authenticated inventories still precede any publication.
             if not seasonal_questions and not minibench_questions:
                 logger.info("Automatic inventory complete: no eligible unanswered open question" if automatic_one
                             else "Tournament inventory complete: no eligible question")
+                if automatic_one:
+                    from automatic_comment_recovery import recover_one_comment
+                    recovery = await recover_one_comment(template_bot)
+                    logger.info("Automatic comment recovery: %s", recovery)
                 return []
             if automatic_one or first_live_post_id is not None:
                 # BOTH unattended and explicitly supervised single-post modes

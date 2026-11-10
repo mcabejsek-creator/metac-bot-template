@@ -240,11 +240,13 @@ class SafePublicationMixin:
                     "Question forecast window is no longer verifiably open; no new POST"
                 )
 
-    async def _drain_publication(self, publisher, key, question):
+    async def _drain_publication(self, publisher, key, question, *, comments_only=False):
         # One blocking action per await. Cancellation of a claim waiter can
         # NEVER continue into a POST in a detached worker. Cancellation during
         # POST/finish leaves durable sending (or a confirmed checkpoint), and no
         # subsequent step is started. The synchronous Publisher API stays valid.
+        if type(comments_only) is not bool:
+            raise ValueError("Comment-only recovery flag must be boolean")
         store = publisher.store
         steps = await self._publication_call(store.steps, key)
         if not steps:
@@ -260,9 +262,18 @@ class SafePublicationMixin:
         if any(step["operation_hash"] != digest(canonical(operation)) for step, operation in zip(steps, operations)):
             raise ValueError("Frozen publication operation hash changed; do not send")
         validate_plan(question, report, operations)
+        if comments_only and (
+            len(steps) != 2
+            or operations[0]["kind"] != "forecast"
+            or steps[0]["state"] != "confirmed"
+            or operations[1]["kind"] != "comment"
+        ):
+            raise PublicationUncertain("Comment-only recovery requires one already confirmed forecast")
         for step in steps:
             if step["state"] == "confirmed":
                 continue
+            if comments_only and json.loads(step["operation"]).get("kind") != "comment":
+                raise PublicationUncertain("Comment-only recovery cannot send a forecast")
             # Recheck right before claiming/sending a NEW forecast. If a long
             # model job outlived the question deadline, leave the frozen
             # journal plan in ready/rejected state without ever attempting POST.

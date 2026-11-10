@@ -14,7 +14,7 @@ from unittest.mock import patch
 from fixed_search_research import (
     FixedSearchClient, GitHubSearchStorage, MARKER, RESOURCE, PHASES,
     ResearchAttemptUncertain, SearchResearchError, WeeklyBudgetExhausted,
-    SEARCH_PRICE_USD, _parse_planned_queries, call_search_once, fixed_search_research,
+    SEARCH_PRICE_USD, _parse_planned_queries, _sources, call_search_once, fixed_search_research,
 )
 
 
@@ -150,6 +150,19 @@ class FixedSearchTests(unittest.TestCase):
             with self.assertRaises(SearchResearchError):
                 _parse_planned_queries(text)
 
+    def test_same_source_url_keeps_distinct_date_value_excerpts(self):
+        previous = {"title": "Official series", "url": "https://example.org/series",
+                    "snippet": "2025: realized count 12.", "date": "2026-01-01"}
+        latest = {**previous, "snippet": "2026: realized count 20.", "date": "2026-10-01"}
+        evidence = _sources({"id": "multi-query", "results": [previous, latest]})
+        self.assertEqual(evidence["sources"], [previous, latest])
+
+    def test_only_identical_source_records_are_deduplicated(self):
+        source = copy.deepcopy(RESPONSE["results"][0])
+        revised = {**source, "last_updated": "2026-11-10"}
+        evidence = _sources({"id": "multi-query", "results": [source, source, revised, revised]})
+        self.assertEqual(evidence["sources"], [source, revised])
+
     def test_transport_disables_redirects_and_has_only_one_post(self):
         calls = []
 
@@ -278,6 +291,58 @@ class HelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Corrected report", result)
         self.assertIn("not instructions", prompts[-1])
         self.assertIn("Initial sourced report", prompts[-1])
+
+    async def test_fact_check_can_verify_original_values_even_after_cached_restart(self):
+        storage, calls, prompts = MemoryStorage(), [], []
+        initial = {"id": "initial-search", "results": [{
+            "title": "Primary table", "url": "https://example.org/primary-table",
+            "snippet": "FY2028: 8.151 trillion USD; FY2027: 7.772 trillion USD.",
+            "date": "2026-10-01"}]}
+        verification = {"id": "verification-search", "results": [{
+            "title": "Revision notice", "url": "https://example.org/revision-notice",
+            "snippet": "No revisions were made in November.", "date": "2026-11-09"}]}
+        responses = iter([initial, verification])
+
+        def transport(queries, key):
+            calls.append(queries)
+            return copy.deepcopy(next(responses))
+
+        client = FixedSearchClient(storage, "fake-key", clock=lambda: NOW, transport=transport)
+        # Deliberately mispair the year/value in the initial draft. The checking
+        # stage must receive the actual table, not only the incorrect summary.
+        outputs = ['["primary table"]', "Draft: FY2028 is 7.772 trillion USD.",
+                   '["latest revision"]', "Corrected report"]
+
+        class Model:
+            def __init__(self): self.answers = iter(outputs)
+            async def invoke(self, prompt):
+                prompts.append(prompt)
+                return next(self.answers)
+
+        class Bot:
+            def __init__(self, search_client):
+                self._fixed_search_client = search_client
+                self.model = Model()
+            def get_llm(self, purpose): return self.model
+            async def _run_blocking(self, function, *args, _timeout=None):
+                return function(*args)
+
+        question = types.SimpleNamespace(id_of_post=10)
+        await fixed_search_research(Bot(client), question, "Question and criteria")
+        first_final_prompt = prompts[-1]
+        self.assertIn("FY2028 is 7.772", first_final_prompt)
+        self.assertIn(initial["results"][0]["snippet"], first_final_prompt)
+        self.assertIn(verification["results"][0]["snippet"], first_final_prompt)
+        self.assertIn('"phase": "initial"', first_final_prompt)
+        self.assertIn('"phase": "fact-check"', first_final_prompt)
+
+        restarted = FixedSearchClient(storage, "fake-key", clock=lambda: NOW,
+            transport=lambda *_: self.fail("Both completed searches must be reused"))
+        await fixed_search_research(Bot(restarted), question, "Question and criteria")
+        self.assertEqual(prompts[-1], first_final_prompt)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(prompts), 8)  # Four model calls per run, unchanged.
+        self.assertEqual(restarted.remaining_usd(), Decimal("4.990"))
 
 
 if __name__ == "__main__":
