@@ -78,6 +78,11 @@ class PublicationStore:
             row = db.execute("SELECT report FROM publications WHERE key = ?", (key,)).fetchone()
             return row[0] if row else None
 
+    def registered_resources(self):
+        """List known resources without reading reports or changing journal state."""
+        with self.connect() as db:
+            return frozenset(row[0] for row in db.execute("SELECT DISTINCT resource FROM publications"))
+
     @staticmethod
     def _canonical_key(db, key):
         alias = db.execute("SELECT publication_key FROM publication_aliases WHERE key = ?", (key,)).fetchone()
@@ -255,3 +260,4 @@ class Publisher:
                 # If the acknowledgement cannot be persisted, 'sending' remains
                 # durable and future processes refuse to resend this operation.
                 self.store.finish(key, step["position"], "confirmed")
+

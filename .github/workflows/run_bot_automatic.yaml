@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - "main.py"
+      - "automatic_model.py"
       - "fixed_search_research.py"
       - "automatic_publication_verification.py"
       - "forecast_validation.py"

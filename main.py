@@ -893,15 +893,33 @@ async def select_automatic_publishable(template_bot, seasonal, minibench, resear
     if blocked:
         logger.warning("Automatic research quarantine: %s post(s); no retry", len(blocked))
 
+    # Validate the complete inventory before prioritizing subsets. Filtering
+    # must not conceal duplicate question IDs or malformed source metadata.
+    if not any(select_one_automatic_candidate(seasonal, minibench)):
+        return [], []
+
     store = None
+    registered_posts = set()
     if template_bot.publish_reports_to_metaculus:
         template_bot._publication_runtime()
         store = template_bot._publication_store
+        resources = await template_bot._publication_call(store.registered_resources)
+        registered_posts = {q.id_of_post for q in seasonal + minibench
+                            if template_bot._publication_resource(q) in resources}
 
-    # Bound GitHub reads when old uncertain/confirmed receipts remain in a
-    # stale Metaculus inventory. Never change their recorded state.
+    # Prioritize whole posts absent from the one-read registry so any number
+    # of old receipts cannot hide new work behind the ten-check bound. Registry
+    # absence is only an ordering hint: pending/steps still check the shard,
+    # including positively existing shards whose registration was interrupted.
+    # Existing ready/rejected recovery retains the bounded fallback below.
+    # More than ten blocked registered receipts can still delay that fallback.
     for _ in range(10):
-        chosen_seasonal, chosen_mini = select_one_automatic_candidate(seasonal, minibench)
+        chosen_seasonal, chosen_mini = select_one_automatic_candidate(
+            [q for q in seasonal if q.id_of_post not in registered_posts],
+            [q for q in minibench if q.id_of_post not in registered_posts],
+        )
+        if not chosen_seasonal and not chosen_mini:
+            chosen_seasonal, chosen_mini = select_one_automatic_candidate(seasonal, minibench)
         if not chosen_seasonal and not chosen_mini:
             return [], []
         question = (chosen_seasonal + chosen_mini)[0]
