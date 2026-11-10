@@ -993,7 +993,7 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                 from fixed_search_research import FixedSearchClient
                 if template_bot.publish_reports_to_metaculus and (
                     template_bot.research_reports_per_question != 1
-                    or template_bot.get_llm("researcher", "model_name") != "perplexity-search"
+                    or template_bot.get_llm("researcher") != "perplexity-search"
                 ):
                     raise RuntimeError("Automatic publishing requires the fixed-price research configuration")
                 template_bot._fixed_search_client = FixedSearchClient.from_environment()
@@ -1037,7 +1037,17 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                     )
                     if minibench_questions else []
                 )
-                return seasonal + minibench
+                reports = seasonal + minibench
+                if automatic_one and template_bot.publish_reports_to_metaculus:
+                    from automatic_publication_verification import verify_published_question
+                    for report in reports:
+                        if isinstance(report, BaseException):
+                            continue
+                        evidence = await template_bot._run_blocking(
+                            verify_published_question, report.question, _timeout=30,
+                        )
+                        logger.info("Automatic Metaculus publication verified: %s", evidence)
+                return reports
             finally:
                 if automatic_one or first_live_post_id is not None:
                     template_bot._automatic_perplexity_budget = None

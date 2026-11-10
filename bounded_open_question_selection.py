@@ -94,13 +94,13 @@ class BoundedPostReader:
 
 
 def _validate_history(post):
-    if "notebook" in post:
+    if post.get("notebook") is not None:
         return False
     conditional_branches = None
-    if "group_of_questions" in post:
+    if post.get("group_of_questions") is not None:
         group = post["group_of_questions"]
         leaves = group.get("questions") if isinstance(group, dict) else None
-    elif "conditional" in post:
+    elif post.get("conditional") is not None:
         conditional = post["conditional"]
         if not isinstance(conditional, dict):
             raise IncompleteQuestionScan("Malformed conditional post")
@@ -191,6 +191,12 @@ def scan_open_tournament(client, tournament, *, read_page, now=None, max_pages=M
             raise IncompleteQuestionScan("Invalid post page")
         consecutive_empty_pages = consecutive_empty_pages + 1 if not rows else 0
         for post in rows:
+            # API null placeholders do not identify a post variant. The pinned
+            # SDK branches on key presence, so omit only absent variant values;
+            # preserve every actual notebook/group/conditional and history field.
+            post = {key: value for key, value in post.items()
+                    if value is not None or key not in
+                    ("notebook", "group_of_questions", "conditional")}
             if not _validate_history(post):
                 continue
             try:
@@ -228,3 +234,4 @@ def deduplicate_tournaments(first, second):
             seen[question.id_of_question] = question
             other.append(question)
     return first, other
+

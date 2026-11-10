@@ -78,7 +78,8 @@ def select_one_automatic_candidate(seasonal, minibench, *, now=None):
         source = getattr(question, "api_json", None)
         if not isinstance(source, dict):
             raise UnsafeAutomaticInventory("Missing source question metadata")
-        if "group_of_questions" in source or "conditional" in source:
+        if any(source.get(key) is not None for key in
+               ("notebook", "group_of_questions", "conditional")):
             continue
         if getattr(question, "group_question_option", None) is not None:
             continue
@@ -103,3 +104,4 @@ def select_one_automatic_candidate(seasonal, minibench, *, now=None):
         return [], []
     _, order, _, selected = min(ranked, key=lambda item: item[:3])
     return ([selected], []) if order == 0 else ([], [selected])
+

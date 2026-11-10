@@ -63,16 +63,31 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         )
         self.assertEqual(select_one_automatic_candidate([old, new], [], now=NOW), ([old], []))
 
+    def test_atomic_null_variant_placeholders_are_not_group_or_notebook(self):
+        candidate = atomic(post_id=94013, qid=74013)
+        source = dict(candidate.api_json,
+                      notebook=None, group_of_questions=None, conditional=None)
+        candidate = candidate.model_copy(update={"api_json": source})
+        self.assertEqual(select_one_automatic_candidate([candidate], [], now=NOW),
+                         ([candidate], []))
+        for variant in ("notebook", "group_of_questions", "conditional"):
+            marked = candidate.model_copy(update={
+                "api_json": dict(source, **{variant: {}}),
+            })
+            with self.subTest(variant=variant):
+                self.assertEqual(select_one_automatic_candidate([marked], [], now=NOW),
+                                 ([], []))
+
     def test_automatic_bot_uses_fixed_search_with_one_report_and_three_forecasts(self):
         bot = app.build_template_bot(automatic_one=True)
         self.assertEqual(bot.research_reports_per_question, 1)
         self.assertEqual(bot.predictions_per_research_report, 3)
-        self.assertEqual(bot.get_llm("researcher", "model_name"), "perplexity-search")
+        self.assertEqual(bot.get_llm("researcher"), "perplexity-search")
         self.assertTrue(bot.publish_reports_to_metaculus)
         self.assertTrue(bot.skip_previously_forecasted_questions)
         manual = app.build_template_bot(automatic_one=False)
         self.assertEqual(manual.research_reports_per_question, 2)
-        self.assertEqual(manual.get_llm("researcher", "model_name"), "perplexity-agent")
+        self.assertEqual(manual.get_llm("researcher"), "perplexity-agent")
 
     def test_closing_soonest_first_and_deterministic_tiebreaks(self):
         late = atomic(post_id=901, qid=101, hours_left=12)
@@ -215,6 +230,77 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         from sponsored_credit_guard import SponsoredCreditUnavailable
         with self.assertRaises(SponsoredCreditUnavailable):
             await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+
+    async def test_uncertain_first_publication_does_not_starve_next_candidate(self):
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        for offset, state in enumerate(("sending", "uncertain")):
+            with self.subTest(state=state):
+                blocked = atomic(post_id=980 + offset, qid=780 + offset, hours_left=3)
+                next_question = atomic(post_id=990 + offset, qid=790 + offset, hours_left=5)
+                bot = self.bot(publish_reports_to_metaculus=True)
+                bot._publication_runtime()
+                key = bot._publication_key(blocked)
+                self.publication_store.prepare(key, "Frozen report", [{
+                    "kind": "forecast", "question_id": blocked.id_of_question,
+                    "payload": {"probability_yes": 0.5},
+                }])
+                self.publication_store.claim(key, 0)
+                if state == "uncertain":
+                    self.publication_store.finish(key, 0, state)
+                selected = await app.select_automatic_publishable(
+                    bot, [blocked], [next_question], self.fixed_search_client(),
+                )
+                self.assertEqual(selected, ([], [next_question]))
+                self.assertEqual(self.publication_store.steps(key)[0]["state"], state)
+
+    async def test_confirmed_receipt_prevents_repeat_when_inventory_history_is_stale(self):
+        old = atomic(post_id=984, qid=784, hours_left=3, prior=False)
+        new = atomic(post_id=994, qid=794, hours_left=5)
+        bot = self.bot(publish_reports_to_metaculus=True)
+        bot._publication_runtime()
+        key = bot._publication_key(old)
+        self.publication_store.prepare(key, "Confirmed report", [{
+            "kind": "forecast", "question_id": old.id_of_question,
+            "payload": {"probability_yes": 0.5},
+        }])
+        self.publication_store.claim(key, 0)
+        self.publication_store.finish(key, 0, "confirmed")
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        selected = await app.select_automatic_publishable(
+            bot, [old, new], [], self.fixed_search_client(),
+        )
+        self.assertEqual(selected, ([new], []))
+        self.assertEqual(self.publication_store.steps(key)[0]["state"], "confirmed")
+
+    async def test_weekly_budget_exhaustion_calls_no_forecast(self):
+        from fixed_search_research import WeeklyBudgetExhausted
+        candidate = atomic(post_id=985, qid=785, hours_left=3)
+        bot = self.bot()
+        client = self.fixed_search_client()
+
+        def budget_status(post_id=None):
+            if post_id is not None:
+                raise WeeklyBudgetExhausted("Synthetic weekly budget spent")
+            return {"blocked_post_ids": [], "remaining_usd": "0.00"}
+
+        client.preflight.side_effect = budget_status
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament",
+                                      lambda client, tournament, **kw: [candidate] if tournament == 33121 else []))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", lambda *a, **kw: {}))
+
+        async def forbidden_forecast(*args, **kwargs):
+            raise AssertionError("Exhausted research budget must prevent all forecasting")
+
+        self.start_patch(patch.object(bot, "forecast_questions", forbidden_forecast))
+        result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+        self.assertEqual(result, [])
+        self.assertIsNone(bot._fixed_search_client)
 
     def test_automatic_cli_is_authorized_without_changing_manual_approval(self):
         main_source = (ROOT / "main.py").read_text()

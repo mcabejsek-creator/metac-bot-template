@@ -7,6 +7,8 @@ on:
     paths:
       - "main.py"
       - "fixed_search_research.py"
+      - "automatic_publication_verification.py"
+      - "tests/test_automatic_publication_verification.py"
       - "tests/test_fixed_search_research.py"
       - "bounded_run.py"
       - "tests/test_bounded_run_cli.py"
