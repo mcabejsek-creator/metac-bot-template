@@ -11,7 +11,8 @@ class ActionsConfigurationTests(OfflineTestCase):
         super().setUp()
         root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
         self.workflows = {p.name: yaml.load(p.read_text(), Loader=yaml.BaseLoader) for p in root.glob("*.yaml")}
-        self.publishers = ("run_bot_on_tournament.yaml", "run_bot_on_metaculus_cup.yaml", "test_bot.yaml")
+        self.publishers = ("run_bot_on_tournament.yaml", "run_bot_on_metaculus_cup.yaml", "test_bot.yaml",
+                           "run_bot_automatic.yaml")
 
     def test_all_writers_and_initializer_use_the_same_group_and_state(self):
         names = (*self.publishers, "initialize_publication_state.yaml")
@@ -86,6 +87,25 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("OFFLINE_SUPERVISOR_EXECUTED", result.stdout)
 
+    def test_automatic_publisher_has_recurring_trigger_and_fixed_research_path(self):
+        workflow = self.workflows["run_bot_automatic.yaml"]
+        self.assertIn("schedule", workflow["on"])
+        self.assertTrue(workflow["on"]["schedule"])
+        job = workflow["jobs"]["forecast_job"]
+        self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        self.assertIn("github.run_attempt == 1", job["if"])
+        step = next(s for s in job["steps"] if s.get("name") == "Run bot")
+        command = step["run"].strip()
+        self.assertTrue(command.startswith(".venv/bin/python -B -m bounded_run --seconds 2700 -- "))
+        self.assertEqual(command.split(" -- ", 1)[1],
+                         ".venv/bin/python -B main.py --mode tournament --automatic-one")
+        self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
+        self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
+        self.assertEqual(step["env"]["PERPLEXITY_API_KEY"], "${{ secrets.PERPLEXITY_API_KEY }}")
+        self.assertEqual(step["env"]["OPENROUTER_API_KEY"], "${{ secrets.OPENROUTER_API_KEY }}")
+        self.assertNotIn("PERPLEXITY_VERIFIED_AT_UTC", step["env"])
+        self.assertNotIn("PERPLEXITY_MANUAL_RESEARCH_APPROVAL", step["env"])
+
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
             steps = next(iter(self.workflows[name]["jobs"].values()))["steps"]
@@ -146,8 +166,12 @@ class ActionsConfigurationTests(OfflineTestCase):
         from runtime_limits import RuntimeLimits
         for name in self.publishers:
             minutes = int(self.workflows[name]["jobs"]["forecast_job"]["timeout-minutes"])
-            self.assertEqual(minutes, 210)
-            self.assertGreaterEqual(minutes * 60, RuntimeLimits().run_seconds + 60 + 15 * 60)
+            if name == "run_bot_automatic.yaml":
+                self.assertEqual(minutes, 60)
+                self.assertGreaterEqual(minutes * 60, 2700 + 60 + 10 * 60)
+            else:
+                self.assertEqual(minutes, 210)
+                self.assertGreaterEqual(minutes * 60, RuntimeLimits().run_seconds + 60 + 15 * 60)
 
     def test_offline_regressions_gate_bot_and_initialization_before_secret_step(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
@@ -155,7 +179,13 @@ class ActionsConfigurationTests(OfflineTestCase):
             checks = next(i for i, step in enumerate(steps) if step.get("name") == "Offline publication regressions")
             secret_step = next(i for i, step in enumerate(steps) if "METACULUS_TOKEN" in step.get("env", {}))
             self.assertLess(checks, secret_step)
-            self.assertEqual(steps[checks]["run"], "poetry run python -B -m tests.run")
+            if name == "run_bot_automatic.yaml":
+                self.assertTrue(steps[checks]["run"].startswith("poetry run python -B -m unittest "))
+                for module in ("tests.test_automatic_one_selection", "tests.test_fixed_search_research",
+                               "tests.test_github_publication", "tests.test_publication_recovery"):
+                    self.assertIn(module, steps[checks]["run"])
+            else:
+                self.assertEqual(steps[checks]["run"], "poetry run python -B -m tests.run")
             self.assertNotIn("env", steps[checks])
 
     def test_review_is_read_only_and_uses_its_existing_schedule(self):
@@ -197,3 +227,4 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertNotIn('inputs.confirmation', step["run"])
         self.assertNotIn('main.py', step["run"])
         self.assertEqual(step["env"]["PRIOR_RUNS_ACK"], "${{ inputs.confirmation }}")
+
