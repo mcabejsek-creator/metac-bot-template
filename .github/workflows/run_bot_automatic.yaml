@@ -19,6 +19,7 @@ on:
       - "sponsored_credit_guard.py"
       - "runtime_limits.py"
       - "bounded_run.py"
+      - "tools/queue_next_automatic.py"
       - "pyproject.toml"
       - "poetry.lock"
       - ".github/workflows/run_bot_automatic.yaml"
@@ -26,6 +27,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 env:
   METACULUS_PUBLICATION_BACKEND: github
@@ -64,8 +66,10 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-root
       - name: Offline publication regressions
-        run: poetry run python -B -m unittest tests.test_automatic_one_selection tests.test_fixed_search_research tests.test_automatic_publication_verification tests.test_github_publication tests.test_publication_recovery tests.test_bounded_run_cli
+        id: offline_checks
+        run: poetry run python -B -m unittest tests.test_automatic_one_selection tests.test_fixed_search_research tests.test_automatic_publication_verification tests.test_github_publication tests.test_publication_recovery tests.test_bounded_run_cli tests.test_queue_next_automatic
       - name: Run bot
+        id: bot
         run: .venv/bin/python -B -m bounded_run --seconds 2700 -- .venv/bin/python -B main.py --mode tournament --automatic-one
         env:
           PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF: "YES"
@@ -74,3 +78,8 @@ jobs:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Queue next automatic pass
+        if: ${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' && (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure') }}
+        run: python -B tools/queue_next_automatic.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
