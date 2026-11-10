@@ -1,8 +1,10 @@
 """Offline-only automatic candidate selection; never runs live Metaculus/models."""
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from forecasting_tools.data_models.data_organizer import DataOrganizer
 
@@ -31,11 +33,61 @@ def atomic(kind="binary", *, post_id=93001, qid=73001, hours_left=5, prior=False
 
 
 class AutomaticOneSelectionTests(OfflineTestCase):
+    def fixed_search_client(self, *, blocked=()):
+        client = SimpleNamespace(
+            preflight=Mock(return_value={"blocked_post_ids": sorted(blocked),
+                                         "remaining_usd": "5.00",
+                                         "reserved_last_seven_days_usd": "0.00",
+                                         "weekly_target_usd": "5.00"}),
+            blocked_post_ids=Mock(return_value=set(blocked)),
+            remaining_usd=Mock(return_value=Decimal("5.00")),
+        )
+        self.start_patch(patch(
+            "fixed_search_research.FixedSearchClient.from_environment",
+            return_value=client,
+        ))
+        return client
+
     def test_five_valid_individual_types_select_exactly_one(self):
         for i, kind in enumerate(("binary", "multiple_choice", "numeric", "discrete", "date")):
             with self.subTest(kind=kind):
                 q = atomic(kind, post_id=94000+i, qid=74000+i)
                 self.assertEqual(select_one_automatic_candidate([q], [], now=NOW), ([q], []))
+
+    def test_old_still_open_question_is_not_excluded_by_publication_age(self):
+        old = atomic(post_id=94011, qid=74011, hours_left=3).model_copy(
+            update={"open_time": NOW - timedelta(days=45)},
+        )
+        new = atomic(post_id=94012, qid=74012, hours_left=12).model_copy(
+            update={"open_time": NOW - timedelta(minutes=5)},
+        )
+        self.assertEqual(select_one_automatic_candidate([old, new], [], now=NOW), ([old], []))
+
+    def test_atomic_null_variant_placeholders_are_not_group_or_notebook(self):
+        candidate = atomic(post_id=94013, qid=74013)
+        source = dict(candidate.api_json,
+                      notebook=None, group_of_questions=None, conditional=None)
+        candidate = candidate.model_copy(update={"api_json": source})
+        self.assertEqual(select_one_automatic_candidate([candidate], [], now=NOW),
+                         ([candidate], []))
+        for variant in ("notebook", "group_of_questions", "conditional"):
+            marked = candidate.model_copy(update={
+                "api_json": dict(source, **{variant: {}}),
+            })
+            with self.subTest(variant=variant):
+                self.assertEqual(select_one_automatic_candidate([marked], [], now=NOW),
+                                 ([], []))
+
+    def test_automatic_bot_uses_fixed_search_with_one_report_and_three_forecasts(self):
+        bot = app.build_template_bot(automatic_one=True)
+        self.assertEqual(bot.research_reports_per_question, 1)
+        self.assertEqual(bot.predictions_per_research_report, 3)
+        self.assertEqual(bot.get_llm("researcher"), "perplexity-search")
+        self.assertTrue(bot.publish_reports_to_metaculus)
+        self.assertTrue(bot.skip_previously_forecasted_questions)
+        manual = app.build_template_bot(automatic_one=False)
+        self.assertEqual(manual.research_reports_per_question, 2)
+        self.assertEqual(manual.get_llm("researcher"), "perplexity-agent")
 
     def test_closing_soonest_first_and_deterministic_tiebreaks(self):
         late = atomic(post_id=901, qid=101, hours_left=12)
@@ -95,6 +147,7 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         early = atomic(post_id=971, qid=771, hours_left=4)
         later = atomic(post_id=972, qid=772, hours_left=6)
         bot = self.bot()
+        search_client = self.fixed_search_client()
         scanned, submitted = [], []
 
         def scan(client, tournament, *, read_page):
@@ -104,6 +157,7 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         async def forecast(questions, return_exceptions):
             self.assertEqual(scanned, [33121, app.MetaculusClient.CURRENT_MINIBENCH_ID])
             self.assertEqual(len(questions), 1)
+            self.assertIs(bot._fixed_search_client, search_client)
             submitted.extend(questions)
             return list(questions)
 
@@ -122,18 +176,15 @@ class AutomaticOneSelectionTests(OfflineTestCase):
             verified.append((key.endswith("9fc"), expected_suffix))
             return {"remaining_usd": "34.29481"}
         self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", fake_credit_check))
-        from perplexity_run_budget import PerplexityAutoRunBudget
-        fake_budget = object()
-        self.start_patch(patch("perplexity_run_budget.PerplexityAutoRunBudget",
-                               return_value=fake_budget))
         result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
-        self.assertIsNone(bot._automatic_perplexity_budget)
+        self.assertIsNone(bot._fixed_search_client)
         self.assertEqual(verified, [(True, "9fc")])
         self.assertEqual(result, [early])
         self.assertEqual(submitted, [early])
 
     async def test_no_candidate_calls_no_credit_api_or_model(self):
         bot = self.bot()
+        self.fixed_search_client()
         scanned = []
         def scan(client, tournament, *, read_page):
             scanned.append(tournament)
@@ -154,6 +205,7 @@ class AutomaticOneSelectionTests(OfflineTestCase):
     async def test_credit_denial_precedes_all_model_calls(self):
         candidate = atomic(post_id=973, qid=773, hours_left=4)
         bot = self.bot()
+        self.fixed_search_client()
         def scan(client, tournament, *, read_page):
             return [candidate] if tournament == 33121 else []
         def denied(*args, **kwargs):
@@ -179,15 +231,97 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         with self.assertRaises(SponsoredCreditUnavailable):
             await app.forecast_for_mode(bot, "tournament", automatic_one=True)
 
-    def test_no_production_trigger_or_cost_unverified_activation(self):
+    async def test_uncertain_first_publication_does_not_starve_next_candidate(self):
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        for offset, state in enumerate(("sending", "uncertain")):
+            with self.subTest(state=state):
+                blocked = atomic(post_id=980 + offset, qid=780 + offset, hours_left=3)
+                next_question = atomic(post_id=990 + offset, qid=790 + offset, hours_left=5)
+                bot = self.bot(publish_reports_to_metaculus=True)
+                bot._publication_runtime()
+                key = bot._publication_key(blocked)
+                self.publication_store.prepare(key, "Frozen report", [{
+                    "kind": "forecast", "question_id": blocked.id_of_question,
+                    "payload": {"probability_yes": 0.5},
+                }])
+                self.publication_store.claim(key, 0)
+                if state == "uncertain":
+                    self.publication_store.finish(key, 0, state)
+                selected = await app.select_automatic_publishable(
+                    bot, [blocked], [next_question], self.fixed_search_client(),
+                )
+                self.assertEqual(selected, ([], [next_question]))
+                self.assertEqual(self.publication_store.steps(key)[0]["state"], state)
+
+    async def test_confirmed_receipt_prevents_repeat_when_inventory_history_is_stale(self):
+        old = atomic(post_id=984, qid=784, hours_left=3, prior=False)
+        new = atomic(post_id=994, qid=794, hours_left=5)
+        bot = self.bot(publish_reports_to_metaculus=True)
+        bot._publication_runtime()
+        key = bot._publication_key(old)
+        self.publication_store.prepare(key, "Confirmed report", [{
+            "kind": "forecast", "question_id": old.id_of_question,
+            "payload": {"probability_yes": 0.5},
+        }])
+        self.publication_store.claim(key, 0)
+        self.publication_store.finish(key, 0, "confirmed")
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        selected = await app.select_automatic_publishable(
+            bot, [old, new], [], self.fixed_search_client(),
+        )
+        self.assertEqual(selected, ([new], []))
+        self.assertEqual(self.publication_store.steps(key)[0]["state"], "confirmed")
+
+    async def test_weekly_budget_exhaustion_calls_no_forecast(self):
+        from fixed_search_research import WeeklyBudgetExhausted
+        candidate = atomic(post_id=985, qid=785, hours_left=3)
+        bot = self.bot()
+        client = self.fixed_search_client()
+
+        def budget_status(post_id=None):
+            if post_id is not None:
+                raise WeeklyBudgetExhausted("Synthetic weekly budget spent")
+            return {"blocked_post_ids": [], "remaining_usd": "0.00"}
+
+        client.preflight.side_effect = budget_status
+        self.start_patch(patch.object(app, "BoundedPostReader", lambda *_: object()))
+        self.start_patch(patch.object(app, "scan_open_tournament",
+                                      lambda client, tournament, **kw: [candidate] if tournament == 33121 else []))
+        self.start_patch(patch.object(app, "deduplicate_tournaments", lambda a, b: (a, b)))
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        self.start_patch(patch.object(app, "verify_sponsored_openrouter_credit", lambda *a, **kw: {}))
+
+        async def forbidden_forecast(*args, **kwargs):
+            raise AssertionError("Exhausted research budget must prevent all forecasting")
+
+        self.start_patch(patch.object(bot, "forecast_questions", forbidden_forecast))
+        result = await app.forecast_for_mode(bot, "tournament", automatic_one=True)
+        self.assertEqual(result, [])
+        self.assertIsNone(bot._fixed_search_client)
+
+    def test_automatic_cli_is_authorized_without_changing_manual_approval(self):
         main_source = (ROOT / "main.py").read_text()
-        workflow_source = (ROOT / ".github/workflows/run_bot_on_tournament.yaml").read_text()
-        self.assertNotIn("parser.add_argument(\"--automatic-one\"", main_source)
-        self.assertNotIn("--automatic-one", workflow_source)
-        self.assertNotIn("\\n  schedule:", workflow_source)
-        self.assertIn("default: DO_NOT_RUN", workflow_source)
+        manual = (ROOT / ".github/workflows/run_bot_on_tournament.yaml").read_text()
+        automatic = (ROOT / ".github/workflows/run_bot_automatic.yaml").read_text()
+        self.assertIn('"--automatic-one"', main_source)
+        self.assertIn("--automatic-one", automatic)
+        self.assertIn("\n  schedule:", automatic)
+        self.assertNotIn("--automatic-one", manual)
+        self.assertIn("default: DO_NOT_RUN", manual)
+
+    async def test_automatic_and_specific_post_modes_are_mutually_exclusive(self):
+        with self.assertRaises(RuntimeError):
+            await app.forecast_for_mode(
+                self.bot(), "tournament", automatic_one=True, first_live_post_id=93001,
+            )
+        with self.assertRaises(RuntimeError):
+            await app.forecast_for_mode(self.bot(), "metaculus_cup", automatic_one=True)
 
 
 if __name__ == "__main__":
     import unittest
     unittest.main()
+

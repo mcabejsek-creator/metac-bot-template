@@ -244,6 +244,10 @@ This question's outcome will be determined by the specific criteria below:
             if isinstance(researcher, GeneralLlm):
                 research = await researcher.invoke(prompt)
 
+            elif researcher == "perplexity-search":
+                from fixed_search_research import fixed_search_research
+                research = await fixed_search_research(self, question, prompt)
+
             elif researcher == "perplexity-agent":
                 research = await agent_research(self, prompt, phase=worker_configuration.WORKER_CONFIG.agent_phases[0])
 
@@ -292,7 +296,7 @@ This question's outcome will be determined by the specific criteria below:
             if researcher != "perplexity-agent" and not getattr(self, "_research_text_only_warned", False):
                 logger.warning("Research model exposes text only: completion status unavailable; nonempty text validated")
                 self._research_text_only_warned = True
-            logger.info(f"Found Research for URL {question.page_url}:\n{research}")
+            logger.info("Research completed for URL %s (%s characters)", question.page_url, len(research))
             return research
 
     ##################################### BINARY QUESTIONS #####################################
@@ -878,6 +882,55 @@ def select_first_live_atomic_question(seasonal, minibench, post_id):
     return ([question], []) if label == "seasonal" else ([], [question])
 
 
+async def select_automatic_publishable(template_bot, seasonal, minibench, research_client):
+    """Skip quarantined operations without resetting them or starving other posts."""
+    from fixed_search_research import WeeklyBudgetExhausted
+
+    status = await template_bot._run_blocking(research_client.preflight, _timeout=180)
+    blocked = set(status["blocked_post_ids"])
+    seasonal = [q for q in seasonal if q.id_of_post not in blocked]
+    minibench = [q for q in minibench if q.id_of_post not in blocked]
+    if blocked:
+        logger.warning("Automatic research quarantine: %s post(s); no retry", len(blocked))
+
+    store = None
+    if template_bot.publish_reports_to_metaculus:
+        template_bot._publication_runtime()
+        store = template_bot._publication_store
+
+    # Bound GitHub reads when old uncertain/confirmed receipts remain in a
+    # stale Metaculus inventory. Never change their recorded state.
+    for _ in range(10):
+        chosen_seasonal, chosen_mini = select_one_automatic_candidate(seasonal, minibench)
+        if not chosen_seasonal and not chosen_mini:
+            return [], []
+        question = (chosen_seasonal + chosen_mini)[0]
+        skip = False
+        if store is not None:
+            pending = await template_bot._publication_call(
+                store.pending, template_bot._publication_resource(question),
+            )
+            key = pending or template_bot._publication_key(question)
+            steps = await template_bot._publication_call(store.steps, key)
+            skip = any(step["state"] in ("sending", "uncertain") for step in steps)
+            skip = skip or bool(steps and all(step["state"] == "confirmed" for step in steps))
+        if skip:
+            logger.warning("Skipping post %s with existing confirmed/uncertain publication receipt", question.id_of_post)
+            seasonal = [q for q in seasonal if q.id_of_post != question.id_of_post]
+            minibench = [q for q in minibench if q.id_of_post != question.id_of_post]
+            continue
+        try:
+            await template_bot._run_blocking(research_client.preflight, question.id_of_post, _timeout=90)
+        except WeeklyBudgetExhausted:
+            logger.info("Automatic bot idle: rolling seven-day research budget reached")
+            return [], []
+        logger.info("Automatic candidate: post=%s question=%s; research allowance remaining USD %s",
+                    question.id_of_post, question.id_of_question, status["remaining_usd"])
+        return chosen_seasonal, chosen_mini
+    logger.warning("Automatic bot idle: bounded journal checks exhausted")
+    return [], []
+
+
 async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, automatic_one=False):
     """One run budget and event loop, including retrieval and both tournaments."""
     if first_live_post_id is not None and run_mode != "tournament":
@@ -911,9 +964,9 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                     seasonal_questions, minibench_questions, first_live_post_id,
                 )
             elif automatic_one:
-                # Future automation only; not exposed by CLI/workflows until
-                # separately approved with verified cost/eligibility policy.
-                # Both complete scans precede selection; output size <= 1.
+                automatic_inventories = (seasonal_questions, minibench_questions)
+                # Both complete scans precede selection; old unanswered
+                # questions remain eligible, and output size is at most one.
                 seasonal_questions, minibench_questions = select_one_automatic_candidate(
                     seasonal_questions, minibench_questions,
                 )
@@ -921,13 +974,14 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
             # initialize the remote publication journal or request model work.
             # Keep the two-phase read-only scan above mandatory in all cases.
             if not seasonal_questions and not minibench_questions:
+                logger.info("Automatic inventory complete: no eligible unanswered open question" if automatic_one
+                            else "Tournament inventory complete: no eligible question")
                 return []
             if automatic_one or first_live_post_id is not None:
                 # BOTH unattended and explicitly supervised single-post modes
                 # must verify the DONATED OpenRouter key identity and reserve
                 # after both complete scans, before any paid model or journal.
-                # The identity must be explicitly configured on future
-                # approved automatic workflows; missing it fails closed.
+                # Missing or mismatched donated-key identity fails closed.
                 import os
                 await template_bot._run_blocking(
                     verify_sponsored_openrouter_credit,
@@ -936,21 +990,19 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                     _timeout=30,
                 )
             if automatic_one:
-                # Future automation still cannot be called from the CLI.
-                # Operator attestation expires after 6h, preventing
-                # unattended paid research on unverified Perplexity balance.
-                import os
-                from perplexity_run_budget import PerplexityAutoRunBudget
-                template_bot._automatic_perplexity_budget = PerplexityAutoRunBudget(
-                    approved=(os.environ.get("PERPLEXITY_AUTO_RESEARCH_APPROVAL")
-                              == "APPROVE_TWO_AGENT_REQUESTS"),
-                    balance_usd=os.environ.get("PERPLEXITY_VERIFIED_BALANCE_USD"),
-                    verified_at=os.environ.get("PERPLEXITY_VERIFIED_AT_UTC"),
-                    run_cap_usd=os.environ.get("PERPLEXITY_MAX_AUTO_RUN_USD"),
-                    auto_recharge_confirmed_off=(
-                        os.environ.get("PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF") == "YES"
-                    ),
+                from fixed_search_research import FixedSearchClient
+                if template_bot.publish_reports_to_metaculus and (
+                    template_bot.research_reports_per_question != 1
+                    or template_bot.get_llm("researcher") != "perplexity-search"
+                ):
+                    raise RuntimeError("Automatic publishing requires the fixed-price research configuration")
+                template_bot._fixed_search_client = FixedSearchClient.from_environment()
+                seasonal_questions, minibench_questions = await select_automatic_publishable(
+                    template_bot, *automatic_inventories, template_bot._fixed_search_client,
                 )
+                if not seasonal_questions and not minibench_questions:
+                    template_bot._fixed_search_client = None
+                    return []
             if first_live_post_id is not None:
                 # A supervised one-post attempt can cost up to FOUR Agent
                 # requests: 2 independent reports x initial + fact-check.
@@ -985,10 +1037,22 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                     )
                     if minibench_questions else []
                 )
-                return seasonal + minibench
+                reports = seasonal + minibench
+                if automatic_one and template_bot.publish_reports_to_metaculus:
+                    from automatic_publication_verification import verify_published_question
+                    for report in reports:
+                        if isinstance(report, BaseException):
+                            continue
+                        evidence = await template_bot._run_blocking(
+                            verify_published_question, report.question, _timeout=30,
+                        )
+                        logger.info("Automatic Metaculus publication verified: %s", evidence)
+                return reports
             finally:
                 if automatic_one or first_live_post_id is not None:
                     template_bot._automatic_perplexity_budget = None
+                if automatic_one:
+                    template_bot._fixed_search_client = None
         if run_mode == "metaculus_cup":
             template_bot.skip_previously_forecasted_questions = False
             return await template_bot.forecast_on_tournament(client.CURRENT_METACULUS_CUP_ID, return_exceptions=True)
@@ -996,6 +1060,34 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
             template_bot.skip_previously_forecasted_questions = False
             return await template_bot.forecast_on_tournament("bot-testing-area", return_exceptions=True)
         raise ValueError("Unknown run mode")
+
+
+def build_template_bot(*, automatic_one=False):
+    """Preserve supervised V2 defaults; automatic runs use bounded Search only."""
+    bot = SummerTemplateBot2026(
+        research_reports_per_question=worker_configuration.WORKER_CONFIG.research_reports_per_question,
+        predictions_per_research_report=worker_configuration.WORKER_CONFIG.predictions_per_research_report,
+        use_research_summary_to_forecast=False,
+        publish_reports_to_metaculus=True,
+        folder_to_save_reports_to=None,
+        skip_previously_forecasted_questions=True,
+        extra_metadata_in_explanation=True,
+        llms={
+            "default": GeneralLlm(
+                model="openrouter/openai/gpt-4o",
+                temperature=0.3,
+                timeout=40,
+                allowed_tries=2,
+            ),
+            "summarizer": "openrouter/openai/gpt-4o-mini",
+            "researcher": worker_configuration.WORKER_CONFIG.researcher,
+            "parser": "openrouter/openai/gpt-4o-mini",
+        },
+    )
+    if automatic_one:
+        bot.research_reports_per_question = 1
+        bot._llms["researcher"] = "perplexity-search"
+    return bot
 
 
 if __name__ == "__main__":
@@ -1018,50 +1110,36 @@ if __name__ == "__main__":
         default=None,
         help="Optional FIRST LIVE guard: allow one validated, unforecasted atomic question by public post ID",
     )
+    parser.add_argument(
+        "--automatic-one",
+        action="store_true",
+        help="Automatically publish one eligible unanswered tournament question within the rolling research budget",
+    )
     args = parser.parse_args()
     run_mode: Literal["tournament", "metaculus_cup", "test_questions"] = args.mode
     if args.first_live_post_id is not None and (args.first_live_post_id <= 0 or run_mode != "tournament"):
         parser.error("--first-live-post-id requires a positive public post ID and --mode tournament")
+    if args.automatic_one and (args.first_live_post_id is not None or run_mode != "tournament"):
+        parser.error("--automatic-one requires tournament mode and excludes --first-live-post-id")
 
     check_environment(strict=True)
     publish_to_metaculus = True
     print_startup_banner(run_mode, will_publish=publish_to_metaculus)
 
-    # Configure the bot. The `llms=` block below is commented out to use
-    # whichever default models forecasting-tools picks based on your env vars;
-    # uncomment and edit to pin specific models.
-    template_bot = SummerTemplateBot2026(
-        research_reports_per_question=worker_configuration.WORKER_CONFIG.research_reports_per_question,
-predictions_per_research_report=worker_configuration.WORKER_CONFIG.predictions_per_research_report,
-        use_research_summary_to_forecast=False,
-        publish_reports_to_metaculus=publish_to_metaculus,
-        folder_to_save_reports_to=None,
-        skip_previously_forecasted_questions=True,
-        extra_metadata_in_explanation=True,
-                llms={
-    "default": GeneralLlm(
-        model="openrouter/openai/gpt-4o",
-        temperature=0.3,
-        timeout=40,
-        allowed_tries=2,
-    ),
-    "summarizer": "openrouter/openai/gpt-4o-mini",
-    "researcher": worker_configuration.WORKER_CONFIG.researcher,
-    "parser": "openrouter/openai/gpt-4o-mini",
-},
-)
+    template_bot = build_template_bot(automatic_one=args.automatic_one)
 
     # Per-mode tournament URL shown in the summary banner footer. These
     # piggyback on the forecasting_tools SDK constants and need updating
     # whenever those rotate seasons.
     TOURNAMENT_URLS = {
-        "tournament": "https://www.metaculus.com/tournament/summer-futureeval-2026/",
+        "tournament": "https://www.metaculus.com/tournament/fall-futureeval-2026/",
         "metaculus_cup": "https://www.metaculus.com/tournament/metaculus-cup-summer-2025/",
         "test_questions": "https://www.metaculus.com/tournament/bot-testing-area/",
     }
 
     forecast_reports = asyncio.run(cancellable_cli(forecast_for_mode(
         template_bot, run_mode, first_live_post_id=args.first_live_post_id,
+        automatic_one=args.automatic_one,
     )))
 
     template_bot.log_report_summary(forecast_reports)
@@ -1070,3 +1148,6 @@ predictions_per_research_report=worker_configuration.WORKER_CONFIG.predictions_p
         will_publish=publish_to_metaculus,
         tournament_url=TOURNAMENT_URLS.get(run_mode),
     )
+    if args.automatic_one and any(isinstance(report, BaseException) for report in forecast_reports):
+        raise SystemExit(1)
+

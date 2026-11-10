@@ -65,13 +65,18 @@ def supervise(command, *, seconds=RuntimeLimits().run_seconds, grace=60):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seconds", type=float, default=RuntimeLimits().run_seconds,
+                        help="Hard deadline in seconds; may only shorten the default run limit")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if not 0 < args.seconds <= RuntimeLimits().run_seconds:
+        parser.error("--seconds must be positive and no greater than the default run limit")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("A child command is required")
-    return supervise(command)
+    return supervise(command, seconds=args.seconds)
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

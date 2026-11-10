@@ -43,6 +43,23 @@ class FakeClient:
 
 
 class ScanTests(unittest.TestCase):
+    def test_null_variant_keys_do_not_hide_atomic_question_or_reach_sdk(self):
+        raw = post(321)
+        raw.update(notebook=None, group_of_questions=None, conditional=None)
+
+        class NullSensitiveClient(FakeClient):
+            def _post_json_to_questions_while_handling_groups(self, data, mode):
+                assert not any(key in data for key in
+                               ("notebook", "group_of_questions", "conditional"))
+                return super()._post_json_to_questions_while_handling_groups(data, mode)
+
+        result = scan_open_tournament(
+            NullSensitiveClient(), 33121, read_page=lambda *_: ([raw], False), now=NOW,
+        )
+        self.assertEqual([q.id_of_question for q in result], [321])
+        self.assertIn("notebook", raw)  # Keep the transport's original evidence unchanged.
+        self.assertIsNone(raw["notebook"])
+
     def test_first_page_empty_does_not_hide_later_open_question(self):
         calls = []
         pages = {
@@ -307,6 +324,9 @@ class PinnedSDKCompatibilityTests(unittest.TestCase):
         self.assertTrue(callable(getattr(client, "_post_json_to_questions_while_handling_groups")))
         raw = {
             "id": 9991,
+            "notebook": None,
+            "group_of_questions": None,
+            "conditional": None,
             "question": {
                 "id": 9992, "title": "Synthetic offline test question",
                 "type": "binary", "status": "open",
@@ -480,3 +500,4 @@ if __name__ == "__main__":
          patch.object(socket.socket, "connect_ex", side_effect=AssertionError("OFFLINE GUARD")), \
          patch("socket.create_connection", side_effect=AssertionError("OFFLINE GUARD")):
         unittest.main(verbosity=2)
+

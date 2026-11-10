@@ -1,0 +1,76 @@
+name: Vrchcab automatic tournament forecasts
+
+# Authorized recurring production V2: one eligible unanswered question per run.
+# The deployment push starts the first run without an operator dispatch.
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - "main.py"
+      - "fixed_search_research.py"
+      - "automatic_publication_verification.py"
+      - "automatic_one_selection.py"
+      - "bounded_open_question_selection.py"
+      - "publication.py"
+      - "publication_journal.py"
+      - "github_publication.py"
+      - "sponsored_credit_guard.py"
+      - "runtime_limits.py"
+      - "bounded_run.py"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/run_bot_automatic.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  METACULUS_PUBLICATION_BACKEND: github
+  METACULUS_PUBLICATION_STATE_BRANCH: metaculus-publication-state
+  METACULUS_PUBLICATION_STATE_PATH: publication.enc
+  METACULUS_PUBLICATION_SCOPE: default-bot
+
+# Same account-wide lock as every manual V2 publisher and state initializer.
+concurrency:
+  group: metaculus-publication-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  forecast_job:
+    if: >-
+      github.repository == 'mcabejsek-creator/metac-bot-template' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install poetry
+        uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1.4.2
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Offline publication regressions
+        run: poetry run python -B -m unittest tests.test_automatic_one_selection tests.test_fixed_search_research tests.test_automatic_publication_verification tests.test_github_publication tests.test_publication_recovery tests.test_bounded_run_cli
+      - name: Run bot
+        run: .venv/bin/python -B -m bounded_run --seconds 2700 -- .venv/bin/python -B main.py --mode tournament --automatic-one
+        env:
+          PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF: "YES"
+          METACULUS_SPONSORED_KEY_SUFFIX: "9fc"
+          GITHUB_TOKEN: ${{ github.token }}
+          METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

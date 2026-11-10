@@ -6,6 +6,14 @@ on:
   pull_request:
     paths:
       - "main.py"
+      - "fixed_search_research.py"
+      - "automatic_publication_verification.py"
+      - "tests/test_automatic_publication_verification.py"
+      - "tests/test_fixed_search_research.py"
+      - "bounded_run.py"
+      - "tests/test_bounded_run_cli.py"
+      - "tests/test_github_workflows.py"
+      - ".github/workflows/run_bot_automatic.yaml"
       - "automatic_one_selection.py"
       - "manual_next_candidate_preview.py"
       - "tests/test_manual_next_candidate_preview.py"
@@ -127,3 +135,4 @@ jobs:
         env:
           METACULUS_PUBLICATION_BACKEND: github
         run: poetry run python -B -m tests.run --strict-known-bugs --report offline-results.json
+
