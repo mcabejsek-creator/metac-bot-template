@@ -276,6 +276,89 @@ class AutomaticOneSelectionTests(OfflineTestCase):
         self.assertEqual(selected, ([new], []))
         self.assertEqual(self.publication_store.steps(key)[0]["state"], "confirmed")
 
+    async def test_more_than_ten_quarantined_receipts_do_not_hide_new_work_or_expand_gets(self):
+        import json
+        from github_publication import GitHubContents, GitHubPublicationStore, JournalCodec
+        from .test_github_publication import (
+            BRANCH, CONTEXT, GITHUB_KEY, METACULUS_KEY, PATH, REPOSITORY, MemoryGitHub,
+        )
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        for count in (10, 12):
+            with self.subTest(quarantined=count):
+                codec = JournalCodec(METACULUS_KEY, CONTEXT)
+                remote = MemoryGitHub(codec.encode(json.dumps({"version": 1, "resources": []}).encode()))
+                store = GitHubPublicationStore(
+                    GitHubContents(REPOSITORY, BRANCH, PATH, GITHUB_KEY, session=remote), codec)
+                bot = self.bot(publish_reports_to_metaculus=True)
+                bot.publication_store = store
+                bot._publication_runtime()
+                old = [atomic(post_id=1100+i, qid=2100+i, hours_left=3) for i in range(count)]
+                fresh = atomic(post_id=1199, qid=2199, hours_left=5)
+                for index, q in enumerate(old):
+                    key = bot._publication_key(q)
+                    store.prepare(key, "Frozen report", [{"kind": "forecast", "question_id": q.id_of_question,
+                                                         "payload": {"probability_yes": 0.5}}])
+                    store.claim(key, 0)
+                    if index % 2:
+                        store.finish(key, 0, "uncertain")
+                files_before, calls_before = dict(remote.files), len(remote.calls)
+                selected = await app.select_automatic_publishable(
+                    bot, old, [fresh], self.fixed_search_client())
+                self.assertEqual(selected, ([], [fresh]))
+                selection_calls = remote.calls[calls_before:]
+                self.assertEqual(len(selection_calls), 5)  # Registry + pending/steps for only the fresh post.
+                self.assertTrue(all(method == "GET" for method, _ in selection_calls))
+                self.assertEqual(remote.files, files_before)  # No claim, retry, or quarantine reset.
+
+    async def test_registered_ready_and_rejected_plans_keep_the_recovery_fallback(self):
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        bot = self.bot(publish_reports_to_metaculus=True)
+        bot._publication_runtime()
+        for index, state in enumerate(("ready", "rejected")):
+            q = atomic(post_id=1200+index, qid=2200+index, hours_left=3)
+            key = bot._publication_key(q)
+            self.publication_store.prepare(key, "Frozen report", [{"kind": "forecast", "question_id": q.id_of_question,
+                                                                 "payload": {"probability_yes": 0.5}}])
+            if state == "rejected":
+                self.publication_store.claim(key, 0)
+                self.publication_store.finish(key, 0, state)
+            with self.subTest(state=state):
+                selected = await app.select_automatic_publishable(bot, [q], [], self.fixed_search_client())
+                self.assertEqual(selected, ([q], []))
+                self.assertEqual(self.publication_store.steps(key)[0]["state"], state)
+
+    async def test_unregistered_uncertain_shard_is_still_checked_before_new_work(self):
+        import json
+        from github_publication import GitHubContents, GitHubPublicationStore, JournalCodec
+        from .test_github_publication import (
+            BRANCH, CONTEXT, GITHUB_KEY, METACULUS_KEY, PATH, REPOSITORY, MemoryGitHub,
+        )
+        codec = JournalCodec(METACULUS_KEY, CONTEXT)
+        remote = MemoryGitHub(codec.encode(json.dumps({"version": 1, "resources": []}).encode()))
+        store = GitHubPublicationStore(
+            GitHubContents(REPOSITORY, BRANCH, PATH, GITHUB_KEY, session=remote), codec)
+        bot = self.bot(publish_reports_to_metaculus=True)
+        bot.publication_store = store
+        bot._publication_runtime()
+        uncertain = atomic(post_id=1300, qid=2300, hours_left=3)
+        fresh = atomic(post_id=1301, qid=2301, hours_left=5)
+        key = bot._publication_key(uncertain)
+        store.prepare(key, "Frozen report", [{"kind": "forecast", "question_id": uncertain.id_of_question,
+                                             "payload": {"probability_yes": 0.5}}])
+        store.claim(key, 0)
+        # Simulate an authenticated shard whose original index registration
+        # was interrupted. Missing index membership is never proof of no write.
+        remote.files[PATH] = codec.encode(json.dumps({"version": 1, "resources": []}).encode())
+        shard_before = remote.content
+        self.start_patch(patch.object(app, "select_one_automatic_candidate",
+                                      lambda a, b: select_one_automatic_candidate(a, b, now=NOW)))
+        selected = await app.select_automatic_publishable(bot, [uncertain, fresh], [], self.fixed_search_client())
+        self.assertEqual(selected, ([fresh], []))
+        self.assertEqual(store.steps(key)[0]["state"], "sending")
+        self.assertEqual(remote.content, shard_before)
+
     async def test_weekly_budget_exhaustion_calls_no_forecast(self):
         from fixed_search_research import WeeklyBudgetExhausted
         candidate = atomic(post_id=985, qid=785, hours_left=3)

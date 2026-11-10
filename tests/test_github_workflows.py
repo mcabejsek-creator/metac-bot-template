@@ -94,6 +94,7 @@ class ActionsConfigurationTests(OfflineTestCase):
         workflow = self.workflows["run_bot_automatic.yaml"]
         self.assertIn("schedule", workflow["on"])
         self.assertTrue(workflow["on"]["schedule"])
+        self.assertIn("automatic_model.py", workflow["on"]["push"]["paths"])
         job = workflow["jobs"]["forecast_job"]
         self.assertIn("github.ref == 'refs/heads/main'", job["if"])
         self.assertIn("github.run_attempt == 1", job["if"])

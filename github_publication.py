@@ -239,6 +239,11 @@ class GitHubPublicationStore:
         # This does not create state or authorize any publication.
         self._manifest()
 
+    def registered_resources(self):
+        """One authenticated index read for ordering; absence never permits a write."""
+        manifest, _ = self._manifest()
+        return frozenset(manifest["resources"])
+
     def _manifest(self):
         content, sha = self.contents.read()
         try:
@@ -392,3 +397,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
