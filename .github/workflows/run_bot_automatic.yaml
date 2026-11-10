@@ -84,3 +84,5 @@ jobs:
         run: python -B tools/queue_next_automatic.py
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          VRCHCAB_BOT_OUTCOME: ${{ steps.bot.outcome }}
+          VRCHCAB_VERIFIED_FORECASTS: ${{ steps.bot.outputs.verified_forecasts || '0' }}

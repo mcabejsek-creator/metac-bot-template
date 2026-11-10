@@ -1039,7 +1039,9 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                 )
                 reports = seasonal + minibench
                 if automatic_one and template_bot.publish_reports_to_metaculus:
-                    from automatic_publication_verification import verify_published_question
+                    from automatic_publication_verification import (
+                        record_verified_publication, verify_published_question,
+                    )
                     for report in reports:
                         if isinstance(report, BaseException):
                             continue
@@ -1047,6 +1049,7 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
                             verify_published_question, report.question, _timeout=30,
                         )
                         logger.info("Automatic Metaculus publication verified: %s", evidence)
+                        record_verified_publication(evidence)
                 return reports
             finally:
                 if automatic_one or first_live_post_id is not None:

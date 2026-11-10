@@ -30,6 +30,23 @@ def _same_question(record, question_id):
                  or (type(record["question_id"]) is int and record["question_id"] == question_id)))
 
 
+def record_verified_publication(evidence, *, environ=None):
+    """Allow an immediate successor only after the authenticated readback.
+
+    This emits a fixed, non-sensitive GitHub step output. It never requests
+    work itself; failed/uncertain publications cannot produce this signal.
+    """
+    if (not isinstance(evidence, dict) or any(
+            type(evidence.get(field)) is not int or evidence[field] <= 0
+            for field in ("post_id", "question_id", "own_forecast_count"))):
+        raise PublicationVerificationUnavailable("Verified publication evidence is required")
+    environ = os.environ if environ is None else environ
+    path = environ.get("GITHUB_OUTPUT")
+    if environ.get("GITHUB_ACTIONS") == "true" and path:
+        with open(path, "a", encoding="utf-8") as output:
+            output.write("verified_forecasts=1\n")
+
+
 def verify_published_question(question):
     """Return public identity/count evidence from exactly one GET, without retry."""
     post_id, question_id = (getattr(question, field, None) for field in ("id_of_post", "id_of_question"))
