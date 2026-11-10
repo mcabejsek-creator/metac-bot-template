@@ -1066,7 +1066,7 @@ async def forecast_for_mode(template_bot, run_mode, *, first_live_post_id=None, 
 
 
 def build_template_bot(*, automatic_one=False):
-    """Preserve supervised V2 defaults; automatic runs use bounded Search only."""
+    """Keep supervised V2; automatic runs use the verified bounded model/Search."""
     bot = SummerTemplateBot2026(
         research_reports_per_question=worker_configuration.WORKER_CONFIG.research_reports_per_question,
         predictions_per_research_report=worker_configuration.WORKER_CONFIG.predictions_per_research_report,
@@ -1088,8 +1088,14 @@ def build_template_bot(*, automatic_one=False):
         },
     )
     if automatic_one:
+        from automatic_model import (
+            AUTOMATIC_MODEL_ID, AUTOMATIC_MODEL_VERSION, build_automatic_model,
+        )
         bot.research_reports_per_question = 1
         bot._llms["researcher"] = "perplexity-search"
+        bot._llms["default"] = build_automatic_model()
+        logger.info("Automatic forecast configuration: version=%s model=%s reports=1 estimates=3",
+                    AUTOMATIC_MODEL_VERSION, AUTOMATIC_MODEL_ID)
     return bot
 
 

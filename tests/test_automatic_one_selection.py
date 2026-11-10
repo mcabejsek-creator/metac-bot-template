@@ -80,6 +80,7 @@ class AutomaticOneSelectionTests(OfflineTestCase):
 
     def test_automatic_bot_uses_fixed_search_with_one_report_and_three_forecasts(self):
         bot = app.build_template_bot(automatic_one=True)
+        self.assertEqual(bot.get_llm("default", "model_name"), "openrouter/google/gemini-3.7-flash")
         self.assertEqual(bot.research_reports_per_question, 1)
         self.assertEqual(bot.predictions_per_research_report, 3)
         self.assertEqual(bot.get_llm("researcher"), "perplexity-search")
