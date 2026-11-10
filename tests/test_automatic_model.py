@@ -20,7 +20,7 @@ class AutomaticModelTests(unittest.TestCase):
             allowed_tries=1,
             max_tokens=8_192,
         )
-        self.assertEqual(automatic_model.AUTOMATIC_MODEL_VERSION, "vrchcab-gpt41-v1")
+        self.assertEqual(automatic_model.AUTOMATIC_MODEL_VERSION, "vrchcab-gpt41-v2")
 
     def test_locked_sdk_keeps_completion_cap_in_openrouter_request(self):
         model = automatic_model.build_automatic_model()

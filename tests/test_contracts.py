@@ -41,7 +41,7 @@ class PromptContractTests(OfflineTestCase):
     async def test_binary_protects_close_vs_real_event_deadline(self):
         _, prompt = await self.capture("japanese_diet")
         self.assertIn("Never use zero or expired days until close as evidence for Yes or No", prompt)
-        self.assertIn("scheduled resolution time or the actual deadline stated in the resolution criteria", prompt)
+        self.assertIn("A later scheduled resolution time does not extend that event window", prompt)
         self.assertIn("Do not add any motive, purpose, threshold, exclusion", prompt)
 
     def test_actual_close_time_overrides_scheduled_close_and_falls_back(self):

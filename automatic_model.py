@@ -7,7 +7,8 @@ caller's responsibility; this factory never chooses another model or API key.
 from forecasting_tools import GeneralLlm
 
 
-AUTOMATIC_MODEL_VERSION = "vrchcab-gpt41-v1"
+# Includes the generic event-window and source-evidence corrections.
+AUTOMATIC_MODEL_VERSION = "vrchcab-gpt41-v2"
 AUTOMATIC_MODEL_ID = "openrouter/openai/gpt-4.1"
 AUTOMATIC_MODEL_MAX_TOKENS = 8_192
 

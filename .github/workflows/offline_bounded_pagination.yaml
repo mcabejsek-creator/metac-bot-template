@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - "automatic_model.py"
+      - "automatic_comment_recovery.py"
+      - "tests/test_automatic_comment_recovery.py"
+      - "tests/test_binary_event_context.py"
       - "tests/test_automatic_model.py"
       - "tools/smoke_automatic_model.py"
       - ".github/workflows/automatic_model_smoke.yaml"
