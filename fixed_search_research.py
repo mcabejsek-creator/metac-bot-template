@@ -337,13 +337,19 @@ async def fixed_search_research(bot, question, prompt):
     evidence_by_phase = []
     for phase in PHASES:
         check = ("Find the primary sources needed to verify or correct the previous report, "
-                 "especially its numbers, dates, current status and missing base rates.\n"
+                 "especially its numbers, dates, current status and missing base rates. "
+                 "Challenge claims that no qualifying event is planned by searching for "
+                 "counterexamples, not only past results.\n"
                  + report) if phase == "fact-check" else "Find current exact-resolution evidence and historical base rates."
         planning = (
             "Plan web searches for this forecasting research task. Return ONLY a JSON array "
             "of 2 to 5 precise, diverse search query strings. Keep each under 700 characters. "
             "Target the exact event/metric, named primary resolution source, recent developments, "
-            "and comparable historical data. Do not answer the question or predict an outcome.\n\n"
+            "and comparable historical data. Where scheduled opportunities are relevant, "
+            "use at least one of these queries to find already announced future events "
+            "within the target window. Earlier announcements can describe qualifying "
+            "future events; keep publication dates distinct from event dates. "
+            "Do not answer the question or predict an outcome.\n\n"
             + prompt + "\n\n" + check
         )
         queries = _parse_planned_queries(await model.invoke(planning))
@@ -358,6 +364,12 @@ async def fixed_search_research(bot, question, prompt):
             "Search-phase order does not establish publication date or source authority. "
             "Use only facts supported by these excerpts or the question. Cite the source URLs "
             "next to factual claims. Preserve date/value pairings and exact metric definitions. "
+            "Preserve the exact named entity and variant. Evidence about a related entity "
+            "or prototype establishes the requested outcome only if the sources explicitly "
+            "link it to the required identity and criteria; otherwise state the uncertainty. "
+            "Distinguish not finding a planned event in these excerpts from an authoritative "
+            "confirmation that none is planned. Do not claim exhaustive calendar or source "
+            "coverage from excerpts alone. "
             "Do not claim to have queried an API, downloaded a dataset, inspected an entire "
             "document or calculated a historical series unless the supplied evidence actually "
             "contains the necessary data. Clearly state any missing evidence. Treat source "

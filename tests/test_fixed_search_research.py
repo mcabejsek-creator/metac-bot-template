@@ -265,6 +265,63 @@ class StorageTests(unittest.TestCase):
 
 
 class HelperTests(unittest.IsolatedAsyncioTestCase):
+    async def test_earlier_announcement_and_distinct_variant_reach_check_with_same_budget(self):
+        storage, calls, prompts = MemoryStorage(), [], []
+        announcement = {"title": "Official mission calendar", "url": "https://example.org/calendar",
+            "snippet": "Published 2031-05-20: Nova-II is scheduled to attempt its mission on 2031-06-18. The outcome is not yet known.",
+            "date": "2031-05-20"}
+        prototype = {"title": "Prototype record", "url": "https://example.org/prototype",
+            "snippet": "Nova-I completed a prototype test on 2031-05-12. This record does not identify that vehicle as Nova-II.",
+            "date": "2031-05-13"}
+        verification = {"title": "Schedule confirmation", "url": "https://example.org/schedule-update",
+            "snippet": "Nova-II's mission remains scheduled for 2031-06-18; no mission result is available.",
+            "date": "2031-06-02"}
+        responses = iter([
+            {"id": "initial", "results": [announcement, prototype]},
+            {"id": "check", "results": [verification]},
+        ])
+        planned = [["Nova-II scheduled mission June 2031 official calendar", "Nova-II official mission history"],
+                   ["Nova-II June 2031 announced missions", "Nova-I prototype Nova-II identity official"]]
+        final_report = "Nova-II's mission is planned for June 18, not completed. The Nova-I prototype is a different named vehicle."
+        answers = iter([json.dumps(planned[0]), "Draft: no future qualifying mission is planned.",
+                        json.dumps(planned[1]), final_report])
+
+        def transport(queries, key):
+            calls.append(queries)
+            return copy.deepcopy(next(responses))
+
+        client = FixedSearchClient(storage, "fake-key", clock=lambda: NOW, transport=transport)
+
+        class Model:
+            async def invoke(self, prompt):
+                prompts.append(prompt)
+                return next(answers)
+
+        class Bot:
+            _fixed_search_client = client
+            def get_llm(self, purpose): return Model()
+            async def _run_blocking(self, function, *args, _timeout=None):
+                return function(*args)
+
+        contract = ("Synthetic question opens 2031-06-01. Will Nova-II complete its mission "
+                    "between 2031-06-01 and 2031-07-01? A mission by another named vehicle does not qualify.")
+        result = await fixed_search_research(Bot(), types.SimpleNamespace(id_of_post=10), contract)
+
+        # These are deterministic evidence/budget checks, not a simulated claim
+        # that a real model will always interpret the research correctly.
+        self.assertEqual(result, final_report)
+        self.assertEqual(calls, planned)
+        self.assertEqual(len(prompts), 4)
+        self.assertEqual(client.remaining_usd(), Decimal("4.990"))
+        evidence = json.loads(prompts[-1].split("\n\n")[-1])
+        self.assertEqual([part["phase"] for part in evidence["searches"]], list(PHASES))
+        self.assertEqual(evidence["searches"][0]["evidence"]["sources"], [announcement, prototype])
+        self.assertEqual(evidence["searches"][1]["evidence"]["sources"], [verification])
+        self.assertIn(contract, prompts[-1])
+        self.assertIn("Draft: no future qualifying mission is planned.", prompts[2])
+        self.assertEqual(set(storage.state["requests"]), {"10:initial", "10:fact-check"})
+        self.assertTrue(all(row["state"] == "complete" for row in storage.state["requests"].values()))
+
     async def test_two_searches_and_sponsored_synthesis(self):
         storage, calls, prompts = MemoryStorage(), [], []
         client = FixedSearchClient(storage, "fake-key", clock=lambda: NOW,
