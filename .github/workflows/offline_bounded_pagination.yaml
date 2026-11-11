@@ -30,6 +30,9 @@ on:
       - "tests/test_review_bot_health.py"
       - "tools/queue_next_automatic.py"
       - "tests/test_queue_next_automatic.py"
+      - "tools/recover_automatic_startup.py"
+      - "tests/test_recover_automatic_startup.py"
+      - ".github/workflows/recover_automatic_startup.yaml"
       - "automatic_one_selection.py"
       - "manual_next_candidate_preview.py"
       - "tests/test_manual_next_candidate_preview.py"
@@ -151,4 +154,3 @@ jobs:
         env:
           METACULUS_PUBLICATION_BACKEND: github
         run: poetry run python -B -m tests.run --strict-known-bugs --report offline-results.json
-
