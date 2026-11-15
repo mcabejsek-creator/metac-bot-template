@@ -313,6 +313,42 @@ def _aggregate(rows):
             "calibration_exclusions": dict(Counter(row["calibration_excluded"] for row in rows if row["calibration_excluded"]))}
 
 
+
+def review_candidates(rows, *, now, inventory_complete):
+    """Small, numeric-only leads for retrospective review; never edit forecasts."""
+    result = {"window_days": 7, "recent_scored_count": 0,
+              "worst_recent": [], "best_recent": [], "worst_historical_fallback": []}
+    if not inventory_complete:
+        return {**result, "status": "withheld_incomplete_inventory"}
+    scored = [row for row in rows if _number(row["official_scores"].get("spot_peer_score"))]
+    cutoff = now - timedelta(days=7)
+    recent = [row for row in scored
+              if (resolved := _time(row["resolved_at"])) is not None and cutoff <= resolved <= now]
+    result["recent_scored_count"] = len(recent)
+
+    def minimal(row):
+        return {key: row[key] for key in ("post_id", "question_id", "project_id", "question_type",
+                                          "forecast_at", "resolved_at", "cohort",
+                                          "probability_yes", "outcome_yes")} | {
+            "spot_peer_score": row["official_scores"]["spot_peer_score"]}
+
+    worst = lambda group, limit: [
+        minimal(row) for row in sorted(
+            group, key=lambda row: (row["official_scores"]["spot_peer_score"],
+                                    row["question_id"]))[:limit]]
+    best = lambda group, limit: [
+        minimal(row) for row in sorted(
+            group, key=lambda row: (-row["official_scores"]["spot_peer_score"],
+                                    row["question_id"]))[:limit]]
+    result["worst_recent"] = worst(recent, 5)
+    result["best_recent"] = best(recent, 2)
+    if not recent:
+        # Old historical cases are diagnostic leads, never new-version results.
+        result["worst_historical_fallback"] = worst(scored, 5)
+    result["status"] = "ready"
+    return result
+
+
 def build_report(posts, *, inventory_complete=True, get_attempts=0, now=None):
     now = now or datetime.now(timezone.utc)
     records, skipped = extract_records(posts, now=now)
@@ -331,6 +367,7 @@ def build_report(posts, *, inventory_complete=True, get_attempts=0, now=None):
         "version_boundary_utc": _iso(VERSION_BOUNDARY),
         "version_boundary_is_date_proxy_not_code_attestation": True,
         "metrics_note": "Binary metrics use actual forecasts active at official spot time. Official score totals describe retrieved records, not necessarily an entire leaderboard.",
+        "review_candidates": review_candidates(records, now=now, inventory_complete=inventory_complete),
         "all_periods": _aggregate(records), "cohorts": cohorts,
         "by_project": {project: _aggregate(rows) for project, rows in sorted(by_project.items())},
         "excluded_records": skipped}
@@ -352,7 +389,26 @@ def markdown_summary(summary):
     for label, item in summary["cohorts"].items():
         experiment = item["calibration_experiment"]
         lines.append(f"- {label}: {experiment['status']}; selected alpha: {experiment.get('selected_alpha_on_training_only', 'not selected')}; production unchanged.")
-    lines += ["", "The holdout is chronological. Training uses only outcomes available before the first held-out forecast and excludes posts shared with the test set. Results are exploratory; no automatic activation."]
+    lines += ["", "The holdout is chronological. Training uses only outcomes available before the first held-out forecast and excludes posts shared with the test set. Results are exploratory; no automatic activation.", "",
+              "## Retrospective case-review candidates (read-only)", ""]
+    candidates = summary["review_candidates"]
+    if candidates["status"] != "ready":
+        lines.append("Shortlist withheld: resolved inventory is incomplete.")
+    else:
+        lines.append(f"Resolved with official spot-peer score in past 7 days: {candidates['recent_scored_count']}.")
+        lines.append("These are review leads, not proven model mistakes. Cohort is a forecast-date proxy.")
+        lines += ["", "| Group | Post | Question ID | Spot-peer score | Forecast date |",
+                  "| --- | --- | ---: | ---: | --- |"]
+        for group, label in (("worst_recent", "Recent: lowest peer score"),
+                             ("best_recent", "Recent: highest peer score"),
+                             ("worst_historical_fallback", "Historical fallback")):
+            for item in candidates[group]:
+                url = f"https://www.metaculus.com/questions/{item['post_id']}/"
+                lines.append(f"| {label} | [#{item['post_id']}]({url}) | {item['question_id']} "
+                             f"| {item['spot_peer_score']:.3f} | {item['forecast_at'][:10]} |")
+        if not any(candidates[group] for group in ("worst_recent", "best_recent", "worst_historical_fallback")):
+            lines.append("| No scored candidates yet | — | — | — | — |")
+    lines += ["", "Investigate original reasoning and sources as of forecast time before proposing any generic prompt change."]
     return "\n".join(lines) + "\n"
 
 
