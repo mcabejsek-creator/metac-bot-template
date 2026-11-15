@@ -155,6 +155,40 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
 
 
+class ReviewCandidateTests(unittest.TestCase):
+    def test_recent_worst_best_are_numeric_only_and_do_not_confuse_old_history(self):
+        recent = [post(i, start=NOW - timedelta(days=i), outcome="no") for i in (1, 2, 3)]
+        old = post(4, start=BASE, outcome="no")
+        for row, score in zip(recent + [old], [-9.5, 5.0, -2.0, -100.0]):
+            row["question"]["my_forecasts"]["score_data"]["spot_peer_score"] = score
+        report = review.build_report(recent + [old], now=NOW)
+        audit = report["summary"]["review_candidates"]
+        self.assertEqual(audit["status"], "ready")
+        self.assertEqual(audit["recent_scored_count"], 3)
+        self.assertEqual([r["question_id"] for r in audit["worst_recent"]], [1, 3, 2])
+        self.assertEqual([r["question_id"] for r in audit["best_recent"]], [2, 3])
+        self.assertEqual(audit["worst_historical_fallback"], [])
+        self.assertEqual(audit["worst_recent"][0]["outcome_yes"], 0)
+        self.assertNotIn("PRIVATE QUESTION", json.dumps(report))
+        summary = review.markdown_summary(report["summary"])
+        self.assertIn("questions/1001/", summary)
+        self.assertNotIn("PRIVATE QUESTION", summary)
+
+    def test_missing_official_spot_score_and_partial_inventory_are_not_leads(self):
+        old = post(1, start=BASE)
+        unscored = post(2, start=NOW - timedelta(days=1))
+        del unscored["question"]["my_forecasts"]["score_data"]["spot_peer_score"]
+        report = review.build_report([old, unscored], now=NOW)
+        audit = report["summary"]["review_candidates"]
+        self.assertEqual(audit["recent_scored_count"], 0)
+        self.assertEqual([r["question_id"] for r in audit["worst_historical_fallback"]], [1])
+        partial = review.build_report([old, unscored], inventory_complete=False, now=NOW)
+        withheld = partial["summary"]["review_candidates"]
+        self.assertEqual(withheld["status"], "withheld_incomplete_inventory")
+        self.assertEqual(withheld["worst_historical_fallback"], [])
+        self.assertIn("Shortlist withheld", review.markdown_summary(partial["summary"]))
+
+
 class CalibrationTests(unittest.TestCase):
     def records(self):
         posts = [post(i + 1, start=BASE + timedelta(days=i), probability=0.9,
