@@ -110,6 +110,50 @@ class BoundContextTests(OfflineTestCase):
                 self.assertIn("likely" if lower_open else "can not", lower)
                 self.assertIn("likely" if upper_open else "can not", upper)
 
+
+    async def test_synthetic_cpi_change_preserves_negative_and_above_hundred_outcomes(self):
+        # Regression for a MiniBench-style month-on-month inflation question.
+        # Capture the prompt only: no LLM, research, Metaculus or publication.
+        q = question("gpr").model_copy(update={
+            "question_text": "What will the month-on-month CPI inflation rate be?",
+            "resolution_criteria": "100 * (October CPI index / September CPI index - 1).",
+            "fine_print": "The index level is nonnegative; deflation is allowed.",
+            "unit_of_measure": "%",
+            "open_lower_bound": True, "open_upper_bound": True,
+            "nominal_lower_bound": -25.0, "nominal_upper_bound": 175.0,
+        })
+        bot = self.bot()
+        probe = AsyncMock(return_value=None)
+        with patch.object(bot, "_numeric_prompt_to_forecast", probe):
+            await bot._run_forecast_on_numeric(q, "Synthetic prior index: 100. Future index unknown.")
+        probe.assert_awaited_once()
+        prompt = probe.await_args.args[1]
+        self.assertIn(q.resolution_criteria, prompt)
+        self.assertIn("A nonnegative CPI or price level does not make its percentage change nonnegative.", prompt)
+        self.assertIn("the mathematical lower bound is -100%", prompt)
+        self.assertIn("there is no universal finite upper bound", prompt)
+        self.assertNotIn(
+            "For percentage or proportion questions, the hard lower bound is 0%", prompt)
+
+    async def test_synthetic_true_proportion_keeps_valid_zero_to_hundred_bounds(self):
+        # The change-rate correction must not discard real fixed-whole limits.
+        q = question("gpr").model_copy(update={
+            "question_text": "What percentage of eligible ballots vote Yes?",
+            "resolution_criteria": "100 * Yes ballots / all eligible ballots.",
+            "fine_print": "Every eligible ballot is either Yes or not Yes.",
+            "unit_of_measure": "%",
+        })
+        bot = self.bot()
+        probe = AsyncMock(return_value=None)
+        with patch.object(bot, "_numeric_prompt_to_forecast", probe):
+            await bot._run_forecast_on_numeric(q, "Synthetic pre-election context only.")
+        probe.assert_awaited_once()
+        prompt = probe.await_args.args[1]
+        self.assertIn(q.resolution_criteria, prompt)
+        self.assertIn("For percentages representing a share of a fixed whole", prompt)
+        self.assertIn("0% and 100% are hard bounds only when", prompt)
+        self.assertIn("between two quantities each genuinely bounded to 0%-100%", prompt)
+
     def test_zero_nominal_hint_remains_valid_for_open_bound(self):
         q = question("percentage_difference").model_copy(update={"open_lower_bound": True, "nominal_lower_bound": 0.0})
         self.assertIn("likely not lower than 0.0", self.bot()._create_upper_and_lower_bound_messages(q)[1])
