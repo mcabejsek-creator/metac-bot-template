@@ -85,7 +85,7 @@ class PromptContractTests(OfflineTestCase):
             "forecasters": "never place any forecast percentile below that confirmed minimum",
             "vvix_maximum": "an observed maximum is a hard lower bound",
             "window_minimum": "an observed minimum is a hard upper bound",
-            "percentage": "the hard lower bound is 0% and the hard upper bound is 100%",
+            "percentage": "0% and 100% are hard bounds only when",
             "percentage_difference": "-100 to +100 percentage points",
             "unesco": "Historical values, creator-provided likely ranges",
         }
