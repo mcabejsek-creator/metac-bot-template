@@ -14,7 +14,9 @@ EXPERIMENT_ID = "sol-shadow-20261117-v1"
 MODEL = "gpt-5.6-sol"
 REASONING_EFFORT = "high"
 MAX_ATTEMPTS = 20
-MAX_PROMPT_BYTES = 24_000
+MAX_PROMPT_BYTES = 22_000
+INPUT_TOKEN_OVERHEAD = 512
+MAX_INPUT_TOKENS = MAX_PROMPT_BYTES + INPUT_TOKEN_OVERHEAD
 MAX_OUTPUT_TOKENS = 6_000
 RESERVE_PER_ATTEMPT_USD = Decimal("0.24")
 TOTAL_RESERVATION_USD = MAX_ATTEMPTS * RESERVE_PER_ATTEMPT_USD
@@ -22,7 +24,13 @@ TOTAL_RESERVATION_USD = MAX_ATTEMPTS * RESERVE_PER_ATTEMPT_USD
 ENDS_AT = datetime(2026, 11, 30, tzinfo=timezone.utc)
 MAX_CAPTURE_AGE_SECONDS = 900
 INPUT_USD_PER_MILLION = Decimal("4")
+INPUT_UPPER_BOUND_USD_PER_MILLION = Decimal("5")
 OUTPUT_USD_PER_MILLION = Decimal("20")
+# Verified 2026-11-17: GPT-5.6 uses 30-minute cache writes by default,
+# billed at 1.25 times ordinary input. Count every input token as a fresh
+# write for the conservative estimate. No caching discount funds more calls.
+# https://developers.openai.com/api/docs/models/gpt-5.6-sol
+# https://developers.openai.com/api/docs/guides/prompt-caching
 
 class ShadowRejected(ValueError):
     """Safe fixed diagnostic; never interpolate provider data or credentials."""
@@ -84,10 +92,18 @@ def payload_digest(payload: dict) -> str:
 
 
 def estimated_cost(input_tokens: int, output_tokens: int) -> Decimal:
+    """Conservative cost ceiling, not an invoice or bonus-balance readback.
+
+The UTF-8 request byte limit bounds visible tokens; the additional allowance
+reserves room for protocol tokens. Default 30-minute cache writes are the
+most expensive permitted input category ($5/M versus $4/M ordinary input).
+"""
     if (type(input_tokens) is not int or type(output_tokens) is not int
-            or input_tokens < 0 or not 0 <= output_tokens <= MAX_OUTPUT_TOKENS):
+            or not 0 <= input_tokens <= MAX_INPUT_TOKENS
+            or not 0 <= output_tokens <= MAX_OUTPUT_TOKENS):
         raise ShadowRejected("invalid_usage")
-    return (input_tokens * INPUT_USD_PER_MILLION + output_tokens * OUTPUT_USD_PER_MILLION) / Decimal(1_000_000)
+    return (input_tokens * INPUT_UPPER_BOUND_USD_PER_MILLION
+            + output_tokens * OUTPUT_USD_PER_MILLION) / Decimal(1_000_000)
 
 
 def score_pair(baseline: list[float], candidate: list[float], outcome: int) -> dict:
@@ -100,3 +116,4 @@ def score_pair(baseline: list[float], candidate: list[float], outcome: int) -> d
         return {"brier": sum((v - int(i == outcome)) ** 2 for i, v in enumerate(p)) / 2,
                 "logloss": -math.log(max(p[outcome], 1e-15))}
     return {"baseline": score(baseline), "candidate": score(candidate)}
+

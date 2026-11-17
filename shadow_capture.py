@@ -41,7 +41,7 @@ class Capture:
         self.originals = {}
 
     def attach(self, bot):
-        for name in ("_binary_prompt_to_forecast", "_multiple_choice_prompt_to_forecast"):
+        for name in ("_binary_prompt_to_forecast",):
             original = getattr(bot, name)
             self.originals[name] = original
             async def wrapped(question, prompt, _original=original):
@@ -58,12 +58,12 @@ class Capture:
 
     def observe(self, bot, q, prompt):
         kind = q.question_type
-        if kind not in ("binary", "multiple_choice"):
+        if kind != "binary":
             return
         now = datetime.now(timezone.utc)
         if now >= ENDS_AT:
             return
-        options = ["Yes", "No"] if kind == "binary" else list(q.options)
+        options = ["Yes", "No"]
         request_for(prompt, options)
         ident = (q.id_of_post, q.id_of_question)
         if any(type(x) is not int or x <= 0 for x in ident):
@@ -87,17 +87,10 @@ class Capture:
         report = reports[0]
         q = report.question
         item = self.records.get((q.id_of_post, q.id_of_question))
-        if not item or item["inconsistent"]:
+        if not item or item["inconsistent"] or item["question_type"] != "binary":
             return False
-        if item["question_type"] == "binary":
-            p = report.prediction
-            baseline = probabilities([p, 1-p], 2)
-        else:
-            opts = report.prediction.predicted_options
-            lookup = {x.option_name: x.probability for x in opts}
-            if len(lookup) != len(opts) or set(lookup) != set(item["options"]):
-                return False
-            baseline = probabilities([lookup[x] for x in item["options"]], len(lookup))
+        p = report.prediction
+        baseline = probabilities([p, 1-p], 2)
         from automatic_model import AUTOMATIC_MODEL_ID, AUTOMATIC_MODEL_VERSION
         item = dict(item, baseline=baseline, baseline_model=AUTOMATIC_MODEL_ID,
                     baseline_version=AUTOMATIC_MODEL_VERSION,

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,17 @@ class PolicyTests(unittest.TestCase):
     def test_finite_lifetime_budget(self):
         self.assertEqual(policy.MAX_ATTEMPTS,20)
         self.assertLess(policy.TOTAL_RESERVATION_USD,5)
-        self.assertLess(policy.estimated_cost(policy.MAX_PROMPT_BYTES+512, policy.MAX_OUTPUT_TOKENS), policy.RESERVE_PER_ATTEMPT_USD)
+        self.assertEqual(policy.TOTAL_RESERVATION_USD, Decimal('4.80'))
+        self.assertEqual(policy.MAX_PROMPT_BYTES, 22000)
+        self.assertEqual(policy.MAX_INPUT_TOKENS, policy.MAX_PROMPT_BYTES+512)
+        worst = policy.estimated_cost(policy.MAX_INPUT_TOKENS, policy.MAX_OUTPUT_TOKENS)
+        self.assertEqual(worst, Decimal('0.23256'))
+        self.assertLess(worst, policy.RESERVE_PER_ATTEMPT_USD)
+
+    def test_cost_estimate_covers_default_cache_writes_and_rejects_excess_usage(self):
+        self.assertEqual(policy.estimated_cost(20000, 6000), Decimal('0.22'))
+        for inputs, outputs in ((policy.MAX_INPUT_TOKENS+1,1),(True,1),(1,True),(-1,1),(1,6001)):
+            with self.assertRaises(policy.ShadowRejected): policy.estimated_cost(inputs,outputs)
 
     def test_exact_input_only_fixed_tools_and_token_bounds(self):
         request = policy.request_for('FROZEN EVIDENCE', ['Yes','No'])
@@ -160,3 +171,4 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(p['jobs']['forecast_job']['steps'][-1]['name'],'Queue next automatic pass')
 
 if __name__ == '__main__': unittest.main()
+

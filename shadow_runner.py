@@ -164,9 +164,11 @@ def artifact(source_id):
 def validate_snapshot(s, source, current):
     if (s.get("experiment") != EXPERIMENT_ID or s.get("repository") != REPO
             or s.get("run_id") != str(source["id"]) or s.get("head_sha") != source["head_sha"]
-            or s.get("question_type") not in ("binary", "multiple_choice") or s.get("inconsistent") is not False
+            or s.get("question_type") != "binary" or s.get("options") != ["Yes", "No"]
+            or s.get("inconsistent") is not False
             or any(type(s.get(k)) is not int or s[k] <= 0 for k in ("post_id", "question_id"))
             or date(s["opens_at"]) > date(s["captured_at"])
+            or not date(s["captured_at"]) <= date(s["baseline_verified_at"]) <= current
             or not eligible_time(date(s["captured_at"]), date(s["closes_at"]), current)):
         raise ShadowRejected("snapshot_not_prospectively_eligible")
     probabilities(s["baseline"], len(s["options"]))
@@ -178,18 +180,27 @@ def check_still_open(s):
     if not token:
         raise ShadowRejected("read_only_key_unavailable")
     status, _, raw = network("www.metaculus.com", f"/api/posts/{s['post_id']}/",
-        headers={"Authorization": "Token " + token, "Accept": "application/json", "User-Agent": "vrchcab-shadow-readonly"})
+        headers={"Authorization": "Token " + token, "Accept": "application/json",
+                 "Cache-Control": "no-cache", "User-Agent": "vrchcab-shadow-readonly"})
     if status != 200:
         raise ShadowRejected("question_status_unavailable")
     p = json.loads(raw)
-    q = p.get("question") or {}
-    if (p.get("id") != s["post_id"] or q.get("id") != s["question_id"] or p.get("status") != "open"
+    if not isinstance(p, dict) or not isinstance(p.get("question"), dict):
+        raise ShadowRejected("question_shape_invalid")
+    q = p["question"]
+    if (type(p.get("id")) is not int or p["id"] != s["post_id"]
+            or type(q.get("id")) is not int or q["id"] != s["question_id"]
+            or q.get("type") != "binary" or q.get("status") != "open"
             or q.get("resolution") is not None
             or any(p.get(k) is not None for k in ("conditional", "group_of_questions", "notebook"))):
         raise ShadowRejected("question_no_longer_open")
-    close = q.get("actual_close_time") or q.get("scheduled_close_time")
-    if close is not None and date(close) <= now():
+    current = now()
+    if not date(q.get("open_time")) <= date(s["captured_at"]) <= current:
+        raise ShadowRejected("question_not_open_at_capture")
+    close = date(q.get("actual_close_time") or q.get("scheduled_close_time"))
+    if close <= current:
         raise ShadowRejected("question_closed")
+    return close
 
 
 def prepare():
@@ -222,8 +233,8 @@ def prepare():
     if any(x["post_id"] == s["post_id"] for x in data["slots"]):
         print("SHADOW already_reserved_no_retry")
         return
-    check_still_open(s)
-    if not eligible_time(date(s["captured_at"]), date(s["closes_at"]), now()):
+    effective_close = min(date(s["closes_at"]), check_still_open(s))
+    if not eligible_time(date(s["captured_at"]), effective_close, now()):
         raise ShadowRejected("snapshot_expired_before_reservation")
     slot = {"post_id": s["post_id"], "question_id": s["question_id"], "source_run": source_id,
         "worker_run": os.environ["GITHUB_RUN_ID"], "digest": payload_digest(payload), "state": "reserved",
@@ -233,7 +244,7 @@ def prepare():
     write_state(data, sha)
     WORK.mkdir(exist_ok=True)
     context = {"payload": payload, "digest": slot["digest"], "post_id": s["post_id"],
-        "worker_run": slot["worker_run"], "captured_at": s["captured_at"], "closes_at": s["closes_at"],
+        "worker_run": slot["worker_run"], "captured_at": s["captured_at"], "closes_at": effective_close.isoformat(),
         "option_count": len(s["options"]), "prepared_at": now().isoformat()}
     (WORK / "request.json").write_bytes(canonical(context))
     with open(os.environ["GITHUB_OUTPUT"], "a") as out:
@@ -276,9 +287,10 @@ def infer():
         if os.environ.get(name):
             raise ShadowRejected("inference_credential_isolation_failed")
     ctx = json.loads((WORK / "request.json").read_bytes())
+    started_at = now()
     if (ctx["worker_run"] != os.environ["GITHUB_RUN_ID"] or payload_digest(ctx["payload"]) != ctx["digest"]
-            or not eligible_time(date(ctx["captured_at"]), date(ctx["closes_at"]), now())
-            or (now() - date(ctx["prepared_at"])).total_seconds() > 60):
+            or not eligible_time(date(ctx["captured_at"]), date(ctx["closes_at"]), started_at)
+            or not 0 <= (started_at - date(ctx["prepared_at"])).total_seconds() <= 60):
         raise ShadowRejected("inference_permit_stale")
     key = os.environ.get("VRCHCAB_OPENAI_TEST_KEY", "")
     if not key or any(x.isspace() for x in key):
@@ -296,8 +308,10 @@ def infer():
         result = response_result(json.loads(raw), ctx["option_count"])
     except Exception:
         result = {"state": "failed", "reason": "request_or_validation_failed_no_retry", "estimated_usd": None}
-    result.update(completed_at=now().isoformat(), elapsed_seconds=round(time.monotonic()-started,3))
-    if now() >= date(ctx["closes_at"]):
+    completed_at = now()
+    result.update(started_at=started_at.isoformat(), completed_at=completed_at.isoformat(),
+                  effective_closes_at=ctx["closes_at"], elapsed_seconds=round(time.monotonic()-started,3))
+    if completed_at >= date(ctx["closes_at"]):
         result["state"] = "failed"
         result["reason"] = "candidate_completed_after_close"
     (WORK / "result.json").write_bytes(canonical(result))
@@ -332,6 +346,18 @@ def main():
         elif command == ["infer"]: infer()
         elif command == ["finish"]: finish()
         else: raise ShadowRejected("invalid_command")
+    except ShadowRejected as error:
+        # Closing/stale questions are expected exclusions, not broken bot runs.
+        # All diagnostic values below are fixed codes, never provider content.
+        expected = {"snapshot_not_prospectively_eligible", "question_no_longer_open",
+                    "question_closed", "question_not_open_at_capture",
+                    "snapshot_expired_before_reservation", "inference_permit_stale",
+                    "prompt_too_large_no_truncation", "request_too_large_no_truncation"}
+        if str(error) in expected:
+            print("SHADOW skipped_no_retry reason=" + str(error))
+            return 0
+        print("SHADOW stopped_without_retry; inspect scoped offline diagnostics")
+        return 1
     except Exception:
         print("SHADOW stopped_without_retry; inspect scoped offline diagnostics")
         return 1
@@ -339,3 +365,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

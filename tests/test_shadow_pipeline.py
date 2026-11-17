@@ -52,3 +52,18 @@ class ShadowPipelineTests(OfflineTestCase):
         observer=capture.Capture()
         self.assertFalse(observer.export([],{}))
         self.assertFalse(observer.export([RuntimeError('no forecast')],{}))
+
+    async def test_multiple_choice_is_never_instrumented_or_captured(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        original = AsyncMock(return_value='unchanged')
+        bot = SimpleNamespace(_binary_prompt_to_forecast=original,
+                              _multiple_choice_prompt_to_forecast=original)
+        observer = capture.Capture()
+        observer.attach(bot)
+        self.assertIs(bot._multiple_choice_prompt_to_forecast, original)
+        q = SimpleNamespace(question_type='multiple_choice')
+        observer.observe(bot, q, 'frozen evidence')
+        self.assertEqual(observer.records, {})
+        self.assertEqual(await bot._multiple_choice_prompt_to_forecast(q, 'evidence'), 'unchanged')
+        observer.detach(bot)
