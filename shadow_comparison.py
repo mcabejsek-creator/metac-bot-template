@@ -4,7 +4,6 @@ Compare the deployed GPT-4.1 aggregate with ONE blind GPT-5.6 Sol response on
 identical, frozen evidence. A smoke test is not forecasting accuracy evidence.
 """
 from __future__ import annotations
-
 from datetime import datetime, timezone
 from decimal import Decimal
 import hashlib
@@ -19,7 +18,7 @@ MAX_PROMPT_BYTES = 24_000
 MAX_OUTPUT_TOKENS = 6_000
 RESERVE_PER_ATTEMPT_USD = Decimal("0.24")
 TOTAL_RESERVATION_USD = MAX_ATTEMPTS * RESERVE_PER_ATTEMPT_USD
-# Pricing is promotional through November 30; do not silently use later rates.
+# Pricing is promotional through November 30; stop a day before that changes.
 ENDS_AT = datetime(2026, 11, 30, tzinfo=timezone.utc)
 MAX_CAPTURE_AGE_SECONDS = 900
 INPUT_USD_PER_MILLION = Decimal("4")
@@ -34,8 +33,7 @@ def eligible_time(captured_at: datetime, closes_at: datetime, now: datetime) -> 
     if any(not isinstance(x, datetime) or x.tzinfo is None for x in dates):
         return False
     return (datetime(2026, 11, 17, 22, tzinfo=timezone.utc) <= captured_at <= now < ENDS_AT
-            and (now - captured_at).total_seconds() <= MAX_CAPTURE_AGE_SECONDS
-            and now < closes_at)
+            and (now - captured_at).total_seconds() <= MAX_CAPTURE_AGE_SECONDS and now < closes_at)
 
 
 def valid_options(options: list[str]) -> list[str]:
@@ -50,7 +48,6 @@ def request_for(prompt: str, options: list[str]) -> dict:
     valid_options(options)
     if not isinstance(prompt, str) or not prompt.strip():
         raise ShadowRejected("empty_prompt")
-    # Only the frozen baseline INPUT is passed; never its answer or rationale.
     suffix = ("\nFor this blind comparison, finish with a JSON object containing "
               "only 'probabilities' (one number from 0 to 1 for each option in "
               "the following order) and 'rationale' (a brief evidence-based "
@@ -59,13 +56,17 @@ def request_for(prompt: str, options: list[str]) -> dict:
     text = prompt + suffix
     if len(text.encode("utf-8")) > MAX_PROMPT_BYTES:
         raise ShadowRejected("prompt_too_large_no_truncation")
-    return {"model": MODEL, "input": text, "reasoning": {"effort": REASONING_EFFORT},
+    payload = {"model": MODEL, "input": text, "reasoning": {"effort": REASONING_EFFORT},
             "max_output_tokens": MAX_OUTPUT_TOKENS, "store": False, "tools": [],
+            "service_tier": "default", "truncation": "disabled",
             "text": {"format": {"type": "json_schema", "name": "blind_forecast", "strict": True,
                 "schema": {"type": "object", "properties": {
                     "probabilities": {"type": "array", "items": {"type": "number"}},
                     "rationale": {"type": "string"}},
                     "required": ["probabilities", "rationale"], "additionalProperties": False}}}}
+    if len(json.dumps(payload, ensure_ascii=False).encode()) > MAX_PROMPT_BYTES:
+        raise ShadowRejected("request_too_large_no_truncation")
+    return payload
 
 
 def probabilities(values: list[float], option_count: int) -> list[float]:
@@ -96,7 +97,6 @@ def score_pair(baseline: list[float], candidate: list[float], outcome: int) -> d
     if type(outcome) is not int or not 0 <= outcome < len(baseline):
         raise ShadowRejected("invalid_outcome")
     def score(p):
-        # Divide multiclass squared error by 2; binary reduces to (p-y)^2.
         return {"brier": sum((v - int(i == outcome)) ** 2 for i, v in enumerate(p)) / 2,
                 "logloss": -math.log(max(p[outcome], 1e-15))}
     return {"baseline": score(baseline), "candidate": score(candidate)}
