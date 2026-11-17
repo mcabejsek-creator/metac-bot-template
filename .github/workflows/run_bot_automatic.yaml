@@ -10,6 +10,8 @@ on:
     paths:
       - "main.py"
       - "automatic_model.py"
+      - "shadow_capture.py"
+      - "shadow_comparison.py"
       - "automatic_comment_recovery.py"
       - "fixed_search_research.py"
       - "automatic_publication_verification.py"
@@ -72,10 +74,10 @@ jobs:
         run: poetry install --no-interaction --no-root
       - name: Offline publication regressions
         id: offline_checks
-        run: poetry run python -B -m unittest tests.test_automatic_model tests.test_automatic_one_selection tests.test_automatic_comment_recovery tests.test_binary_event_context tests.test_fixed_search_research tests.test_automatic_publication_verification tests.test_forecast_validation tests.test_github_publication tests.test_publication_recovery tests.test_bounded_run_cli tests.test_queue_next_automatic tests.test_recover_automatic_startup
+        run: poetry run python -B -m unittest tests.test_automatic_model tests.test_automatic_one_selection tests.test_automatic_comment_recovery tests.test_binary_event_context tests.test_fixed_search_research tests.test_automatic_publication_verification tests.test_forecast_validation tests.test_github_publication tests.test_publication_recovery tests.test_bounded_run_cli tests.test_queue_next_automatic tests.test_recover_automatic_startup tests.test_shadow_pipeline
       - name: Run bot
         id: bot
-        run: .venv/bin/python -B -m bounded_run --seconds 2700 -- .venv/bin/python -B main.py --mode tournament --automatic-one
+        run: .venv/bin/python -B -m bounded_run --seconds 2700 -- .venv/bin/python -B shadow_capture.py --mode tournament --automatic-one
         env:
           PERPLEXITY_AUTO_RECHARGE_CONFIRMED_OFF: "YES"
           METACULUS_SPONSORED_KEY_SUFFIX: "9fc"
@@ -83,6 +85,17 @@ jobs:
           METACULUS_TOKEN: ${{ secrets.METACULUS_TOKEN_V2 }}
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Save encrypted comparison input after verified publication
+        if: ${{ steps.bot.outcome == 'success' && steps.bot.outputs.verified_forecasts == '1' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vrchcab-shadow-input-v1
+          path: .shadow/capture.enc
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 60
       - name: Queue next automatic pass
         if: ${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' && (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure') }}
         run: python -B tools/queue_next_automatic.py

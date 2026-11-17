@@ -68,8 +68,7 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
             self.assertNotIn("${{ secrets.METACULUS_TOKEN }}", step["env"].values())
             if name == "run_bot_on_tournament.yaml":
-                self.assertEqual(step["env"]["FIRST_LIVE_POST_ID"],
-                                 "${{ inputs.first_live_post_id }}")
+                self.assertEqual(step["env"]["FIRST_LIVE_POST_ID"], "${{ inputs.first_live_post_id }}")
                 job_gate = workflow["jobs"]["forecast_job"]["if"]
                 self.assertIn("inputs.first_live_post_id != 'DO_NOT_RUN'", job_gate)
                 self.assertIn("inputs.publication_approval == 'APPROVE_ONE_LIVE_PUBLICATION_RUN'", job_gate)
@@ -84,8 +83,7 @@ class ActionsConfigurationTests(OfflineTestCase):
         import sys
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
-            [sys.executable, "-B", "-m", "bounded_run", "--",
-             sys.executable, "-B", "-c", "print('OFFLINE_SUPERVISOR_EXECUTED')"],
+            [sys.executable, "-B", "-m", "bounded_run", "--", sys.executable, "-B", "-c", "print('OFFLINE_SUPERVISOR_EXECUTED')"],
             cwd=root, capture_output=True, text=True, timeout=12)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("OFFLINE_SUPERVISOR_EXECUTED", result.stdout)
@@ -101,8 +99,7 @@ class ActionsConfigurationTests(OfflineTestCase):
         step = next(s for s in job["steps"] if s.get("name") == "Run bot")
         command = step["run"].strip()
         self.assertTrue(command.startswith(".venv/bin/python -B -m bounded_run --seconds 2700 -- "))
-        self.assertEqual(command.split(" -- ", 1)[1],
-                         ".venv/bin/python -B main.py --mode tournament --automatic-one")
+        self.assertEqual(command.split(" -- ", 1)[1], ".venv/bin/python -B shadow_capture.py --mode tournament --automatic-one")
         self.assertEqual(step["env"]["GITHUB_TOKEN"], "${{ github.token }}")
         self.assertEqual(step["env"]["METACULUS_TOKEN"], "${{ secrets.METACULUS_TOKEN_V2 }}")
         self.assertEqual(step["env"]["PERPLEXITY_API_KEY"], "${{ secrets.PERPLEXITY_API_KEY }}")
@@ -124,15 +121,11 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertLess(steps.index(checks), steps.index(bot))
         self.assertLess(steps.index(bot), len(steps) - 1)
         self.assertEqual(followup["name"], "Queue next automatic pass")
-        self.assertEqual(" ".join(followup["if"].split()),
-                         "${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' "
+        self.assertEqual(" ".join(followup["if"].split()), "${{ always() && !cancelled() && steps.offline_checks.outcome == 'success' "
                          "&& (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure') }}")
         self.assertEqual(followup["run"].strip(), "python -B tools/queue_next_automatic.py")
-        self.assertEqual(followup["env"], {
-            "GITHUB_TOKEN": "${{ github.token }}",
-            "VRCHCAB_BOT_OUTCOME": "${{ steps.bot.outcome }}",
-            "VRCHCAB_VERIFIED_FORECASTS": "${{ steps.bot.outputs.verified_forecasts || '0' }}",
-        })
+        self.assertEqual(followup["env"], {"GITHUB_TOKEN": "${{ github.token }}",
+            "VRCHCAB_BOT_OUTCOME": "${{ steps.bot.outcome }}", "VRCHCAB_VERIFIED_FORECASTS": "${{ steps.bot.outputs.verified_forecasts || '0' }}"})
         for secret in ("METACULUS_TOKEN", "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"):
             self.assertNotIn(secret, workflow.get("env", {}))
             self.assertNotIn(secret, job.get("env", {}))
@@ -140,29 +133,21 @@ class ActionsConfigurationTests(OfflineTestCase):
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
             steps = next(iter(self.workflows[name]["jobs"].values()))["steps"]
-            checkout = next(step for step in steps
-                            if step.get("uses", "").partition("@")[0] == "actions/checkout")
+            checkout = next(step for step in steps if step.get("uses", "").partition("@")[0] == "actions/checkout")
             self.assertEqual(checkout["with"]["persist-credentials"], "false")
 
     def test_all_active_actions_use_verified_official_commit_pins(self):
-        reviewed = {
-            "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",  # v4.4.0
-            "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",  # v5.6.0
-            "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",  # v4.6.2
-            "snok/install-poetry": "a783c322200f0519c7926aa6faa857c4e23e9263",  # v1.4.2
-        }
-
+        reviewed = {"actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
+            "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
+            "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "snok/install-poetry": "a783c322200f0519c7926aa6faa857c4e23e9263"}
         def references(value):
             if isinstance(value, dict):
                 for key, item in value.items():
-                    if key == "uses":
-                        yield item
-                    else:
-                        yield from references(item)
+                    if key == "uses": yield item
+                    else: yield from references(item)
             elif isinstance(value, list):
-                for item in value:
-                    yield from references(item)
-
+                for item in value: yield from references(item)
         seen = set()
         for name, workflow in self.workflows.items():
             for reference in references(workflow):
@@ -176,18 +161,11 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertEqual(seen, set(reviewed))
 
     def test_v3_admission_and_effect_only_edits_trigger_offline_ci(self):
-        # Future PRs may touch only these V3 modules; no silent CI bypass.
         workflow = self.workflows["offline_bounded_pagination.yaml"]
         monitored = workflow["on"]["pull_request"]["paths"]
-        expected = {
-            "reserve_bind_offline.py",
-            "create_effect_offline.py",
-            "tests/test_reserve_bind_offline.py",
-            "tests/test_create_effect_offline.py",
-            "docs/v3_reserve_bind_offline_20261109.md",
-            "docs/create_fixed_effect_offline_20261109.md",
-            "docs/v3_integration_after_pr41_20261109.md",
-        }
+        expected = {"reserve_bind_offline.py", "create_effect_offline.py", "tests/test_reserve_bind_offline.py",
+            "tests/test_create_effect_offline.py", "docs/v3_reserve_bind_offline_20261109.md",
+            "docs/create_fixed_effect_offline_20261109.md", "docs/v3_integration_after_pr41_20261109.md"}
         self.assertEqual(len(monitored), len(set(monitored)), "Duplicate path filters")
         self.assertTrue(expected.issubset(set(monitored)), sorted(expected - set(monitored)))
         self.assertEqual(workflow["permissions"], {"contents": "read"})
@@ -212,9 +190,8 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertLess(checks, secret_step)
             if name == "run_bot_automatic.yaml":
                 self.assertTrue(steps[checks]["run"].startswith("poetry run python -B -m unittest "))
-                for module in ("tests.test_automatic_one_selection", "tests.test_fixed_search_research",
-                               "tests.test_github_publication", "tests.test_publication_recovery",
-                               "tests.test_queue_next_automatic"):
+                for module in ("tests.test_automatic_one_selection", "tests.test_fixed_search_research", "tests.test_github_publication",
+                               "tests.test_publication_recovery", "tests.test_queue_next_automatic"):
                     self.assertIn(module, steps[checks]["run"])
             else:
                 self.assertEqual(steps[checks]["run"], "poetry run python -B -m tests.run")
@@ -226,9 +203,8 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertEqual(set(workflow["on"]), {"schedule", "push", "workflow_dispatch"})
         self.assertEqual(workflow["on"]["schedule"], [{"cron": "43 7 * * *"}])
         self.assertEqual(workflow["on"]["push"]["branches"], ["main"])
-        expected_paths = {"resolved_forecast_review.py", "tests/test_resolved_forecast_review.py",
-                          "tools/review_bot_health.py", "tests/test_review_bot_health.py",
-                          ".github/workflows/review_bot.yaml"}
+        expected_paths = {"resolved_forecast_review.py", "tests/test_resolved_forecast_review.py", "tools/review_bot_health.py",
+                          "tests/test_review_bot_health.py", ".github/workflows/review_bot.yaml"}
         self.assertEqual(set(workflow["on"]["push"]["paths"]), expected_paths)
         self.assertTrue(expected_paths.issubset(self.workflows["offline_bounded_pagination.yaml"]["on"]["pull_request"]["paths"]))
         self.assertNotIn("env", workflow)
@@ -259,8 +235,7 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertNotIn("env", checks)
         for step in steps:
             self.assertNotIn("${{", step.get("run", ""))
-            if step not in (evaluation, health):
-                self.assertNotIn("env", step)
+            if step not in (evaluation, health): self.assertNotIn("env", step)
         for step in steps[-2:]:
             self.assertIn("always()", step["if"])
             self.assertIn("steps.offline_checks.outcome == 'success'", step["if"])
@@ -278,4 +253,3 @@ class ActionsConfigurationTests(OfflineTestCase):
         self.assertNotIn('inputs.confirmation', step["run"])
         self.assertNotIn('main.py', step["run"])
         self.assertEqual(step["env"]["PRIOR_RUNS_ACK"], "${{ inputs.confirmation }}")
-
