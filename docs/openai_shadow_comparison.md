@@ -89,6 +89,13 @@ python -B shadow_evaluate.py --pairs pairs.json --outcomes outcomes.json
 Decrypted files are private local inputs. Raw prompts/results remain encrypted
 in repository state and workflow artifacts; the report prints only aggregates.
 
+Storage is bounded for all twenty attempts, including future encrypted results.
+The raw ledger stays below GitHub's 1 MB Contents limit, while its base64 JSON
+response has a separate 2 MB read allowance. Model/artifact response limits stay
+at 1 MB. A serialized result above 8,192 bytes becomes a compact failed record
+without a retry; its existing reservation remains spent. Oversized captures are
+rejected before a reservation, and an existing ledger is never reset.
+
 ## Release verification
 
 Run focused shadow tests and the complete strict offline suite on the exact

@@ -28,6 +28,14 @@ ROOT = "/repos/" + REPO
 STATE_URL = ROOT + "/contents/" + LEDGER_PATH
 WORK = Path(".shadow")
 MAX_BYTES = 1_000_000
+# The Contents API wraps the file in base64 plus JSON. Keep this allowance
+# separate from model/artifact responses and keep the file itself below 1 MB.
+MAX_LEDGER_RESPONSE_BYTES = 2_000_000
+MAX_LEDGER_RAW_BYTES = 1_000_000
+MAX_CAPTURE_CIPHER_BYTES = 33_000
+MAX_RESULT_BYTES = 8_192
+MAX_RESULT_CIPHER_BYTES = 11_200
+MAX_SLOT_BYTES = 45_000  # Twenty complete slots stay below 901 KB raw.
 WORKFLOW = ".github/workflows/openai_shadow.yaml"
 SOURCE_WORKFLOW = ".github/workflows/run_bot_automatic.yaml"
 
@@ -65,11 +73,14 @@ def network(host, path, *, method="GET", headers=None, body=None, timeout=20):
             or (method == "PUT" and path != STATE_URL)):
         raise ShadowRejected("github_write_denied")
     conn = http.client.HTTPSConnection(host, timeout=timeout)
+    response_limit = (MAX_LEDGER_RESPONSE_BYTES
+        if host == "api.github.com" and method == "GET" and path == STATE_URL + "?ref=" + BRANCH
+        else MAX_BYTES)
     try:
         conn.request(method, path, body=body, headers=headers or {})
         reply = conn.getresponse()
-        raw = reply.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
+        raw = reply.read(response_limit + 1)
+        if len(raw) > response_limit:
             raise ShadowRejected("response_too_large")
         return reply.status, dict(reply.getheaders()), raw
     finally:
@@ -103,6 +114,8 @@ def read_state():
     if item.get("encoding") != "base64" or item.get("path") != LEDGER_PATH:
         raise ShadowRejected("ledger_shape_invalid")
     raw = base64.b64decode(item["content"], validate=False)
+    if len(raw) >= MAX_LEDGER_RAW_BYTES:
+        raise ShadowRejected("ledger_file_too_large_no_reset")
     blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     if item.get("sha") != blob:
         raise ShadowRejected("ledger_integrity_invalid")
@@ -123,6 +136,8 @@ def read_state():
 
 def write_state(data, sha):
     raw = canonical(data)
+    if len(raw) >= MAX_LEDGER_RAW_BYTES:
+        raise ShadowRejected("ledger_file_too_large_no_write")
     expected = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
     ack = gh(STATE_URL, method="PUT", value={"branch": BRANCH, "sha": sha,
         "message": "Record bounded shadow attempt", "content": base64.b64encode(raw).decode()})
@@ -228,6 +243,8 @@ def prepare():
     if raw is None:
         print("SHADOW no_new_eligible_capture")
         return
+    if len(raw) > MAX_CAPTURE_CIPHER_BYTES:
+        raise ShadowRejected("capture_too_large_no_truncation")
     s = json.loads(cipher(os.environ.get("METACULUS_TOKEN", "")).decrypt(raw))
     payload = validate_snapshot(s, source, now())
     if any(x["post_id"] == s["post_id"] for x in data["slots"]):
@@ -240,6 +257,10 @@ def prepare():
         "worker_run": os.environ["GITHUB_RUN_ID"], "digest": payload_digest(payload), "state": "reserved",
         "reserved_usd": str(RESERVE_PER_ATTEMPT_USD), "reserved_at": now().isoformat(),
         "snapshot": raw.decode(), "result": None}
+    # Reserve storage for the largest allowed encrypted result before spending
+    # this attempt, so finishing the twentieth slot cannot strand the ledger.
+    if len(canonical(slot)) + MAX_RESULT_CIPHER_BYTES > MAX_SLOT_BYTES:
+        raise ShadowRejected("slot_metadata_too_large_no_claim")
     data["slots"].append(slot)
     write_state(data, sha)
     WORK.mkdir(exist_ok=True)
@@ -314,6 +335,13 @@ def infer():
     if completed_at >= date(ctx["closes_at"]):
         result["state"] = "failed"
         result["reason"] = "candidate_completed_after_close"
+    if len(canonical(result)) > MAX_RESULT_BYTES:
+        # The request has already been spent. Retain validated accounting and
+        # our timestamps, never retry or save an unbounded model rationale.
+        result = {key: result[key] for key in (
+            "input_tokens", "output_tokens", "estimated_usd", "started_at",
+            "completed_at", "effective_closes_at", "elapsed_seconds") if key in result}
+        result.update(state="failed", reason="result_too_large_no_retry", model=MODEL)
     (WORK / "result.json").write_bytes(canonical(result))
     print("SHADOW inference_status=" + result["state"])
 
@@ -329,7 +357,13 @@ def finish():
     path = WORK / "result.json"
     result = json.loads(path.read_bytes()) if path.exists() else {"state":"failed", "reason":"no_result_no_retry"}
     entry = matches[0]
-    entry["result"] = cipher(os.environ.get("METACULUS_TOKEN", "")).encrypt(canonical(result)).decode()
+    raw_result = canonical(result)
+    if len(raw_result) > MAX_RESULT_BYTES:
+        raise ShadowRejected("result_file_too_large_no_retry")
+    encrypted_result = cipher(os.environ.get("METACULUS_TOKEN", "")).encrypt(raw_result)
+    if len(encrypted_result) > MAX_RESULT_CIPHER_BYTES:
+        raise ShadowRejected("result_cipher_too_large_no_retry")
+    entry["result"] = encrypted_result.decode()
     entry["state"] = result["state"] if result["state"] in ("success", "failed") else "failed"
     write_state(data, sha)
     print("SHADOW_SUMMARY " + json.dumps({"attempts":len(data["slots"]),
@@ -352,6 +386,7 @@ def main():
         expected = {"snapshot_not_prospectively_eligible", "question_no_longer_open",
                     "question_closed", "question_not_open_at_capture",
                     "snapshot_expired_before_reservation", "inference_permit_stale",
+                    "capture_too_large_no_truncation", "slot_metadata_too_large_no_claim",
                     "prompt_too_large_no_truncation", "request_too_large_no_truncation"}
         if str(error) in expected:
             print("SHADOW skipped_no_retry reason=" + str(error))
