@@ -97,7 +97,7 @@ class ShadowLedgerSizeTests(unittest.TestCase):
         source = {"id": 123, "head_sha": "a" * 40, "run_attempt": 1,
                   "repository": {"full_name": capture.REPO}, "head_repository": {"full_name": capture.REPO},
                   "head_branch": "main", "path": worker.SOURCE_WORKFLOW,
-                  "conclusion": "success", "event": "workflow_dispatch"}
+                  "status": "completed", "conclusion": "success", "event": "workflow_dispatch"}
         with tempfile.TemporaryDirectory() as tmp:
             event = Path(tmp) / "event.json"
             event.write_text(json.dumps({"workflow_run": source}))

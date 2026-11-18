@@ -34,7 +34,7 @@ def source_run():
         "id": 123, "repository": {"full_name": capture.REPO},
         "head_repository": {"full_name": capture.REPO}, "head_branch": "main",
         "head_sha": "a" * 40, "path": worker.SOURCE_WORKFLOW,
-        "event": "workflow_dispatch", "run_attempt": 1, "conclusion": "success",
+        "event": "workflow_dispatch", "run_attempt": 1, "status": "completed", "conclusion": "success",
     }
 
 

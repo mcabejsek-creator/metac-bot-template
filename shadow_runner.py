@@ -38,6 +38,7 @@ MAX_RESULT_CIPHER_BYTES = 11_200
 MAX_SLOT_BYTES = 45_000  # Twenty complete slots stay below 901 KB raw.
 WORKFLOW = ".github/workflows/openai_shadow.yaml"
 SOURCE_WORKFLOW = ".github/workflows/run_bot_automatic.yaml"
+SOURCE_COMPLETION_WAIT_SECONDS = 30
 
 
 def now():
@@ -100,13 +101,66 @@ def gh(path, *, method="GET", value=None):
     return json.loads(raw)
 
 
-def check_context(event_name="workflow_run"):
+def check_context(event_name=None):
     env = os.environ
+    allowed = ("workflow_run", "workflow_dispatch") if event_name is None else (event_name,)
     if (env.get("GITHUB_ACTIONS") != "true" or env.get("GITHUB_REPOSITORY") != REPO
             or env.get("GITHUB_REF") != "refs/heads/main" or env.get("GITHUB_RUN_ATTEMPT") != "1"
-            or env.get("GITHUB_EVENT_NAME") != event_name
+            or env.get("GITHUB_EVENT_NAME") not in allowed
             or env.get("GITHUB_WORKFLOW_REF") != REPO + "/" + WORKFLOW + "@refs/heads/main"):
         raise ShadowRejected("context_denied")
+
+
+def resolve_source(event, event_name, *, sleep=None, monotonic=None):
+    """Verify the source through GitHub; only explicit dispatch may wait briefly.
+
+    Production dispatches immediately after its encrypted artifact is saved.
+    Its final queue/cleanup steps can still be running while this job starts.
+    No artifact, ledger reservation or provider call happens until completion.
+    """
+    if not isinstance(event, dict):
+        raise ShadowRejected("source_run_invalid")
+    if event_name == "workflow_dispatch":
+        inputs = event.get("inputs")
+        value = inputs.get("source_run_id") if isinstance(inputs, dict) else None
+        if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", value):
+            raise ShadowRejected("source_run_invalid")
+        source_id, expected_sha = int(value), None
+    elif event_name == "workflow_run":
+        run = event.get("workflow_run")
+        if not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] <= 0:
+            raise ShadowRejected("source_run_invalid")
+        source_id, expected_sha = run["id"], run.get("head_sha")
+        if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+            raise ShadowRejected("source_run_invalid")
+    else:
+        raise ShadowRejected("source_run_invalid")
+    sleep = time.sleep if sleep is None else sleep
+    monotonic = time.monotonic if monotonic is None else monotonic
+    deadline = monotonic() + SOURCE_COMPLETION_WAIT_SECONDS
+    for attempt in range(7):
+        source = gh(ROOT + f"/actions/runs/{source_id}")
+        if (type(source.get("id")) is not int or source["id"] != source_id
+                or source.get("repository", {}).get("full_name") != REPO
+                or source.get("head_repository", {}).get("full_name") != REPO
+                or source.get("head_branch") != "main" or type(source.get("run_attempt")) is not int
+                or source["run_attempt"] != 1 or source.get("path") != SOURCE_WORKFLOW
+                or source.get("event") not in ("push", "schedule", "workflow_dispatch")
+                or not isinstance(source.get("head_sha"), str)
+                or not re.fullmatch(r"[0-9a-f]{40}", source["head_sha"])
+                or (expected_sha is not None and source["head_sha"] != expected_sha)):
+            raise ShadowRejected("untrusted_source_run")
+        expected_sha = source["head_sha"]
+        if source.get("status") == "completed" and source.get("conclusion") == "success":
+            return source
+        if (event_name != "workflow_dispatch" or source.get("status") != "in_progress"
+                or source.get("conclusion") is not None):
+            raise ShadowRejected("untrusted_source_run")
+        remaining = deadline - monotonic()
+        if remaining <= 0 or attempt == 6:
+            raise ShadowRejected("source_not_completed_no_claim")
+        sleep(min(5, remaining))
+    raise ShadowRejected("source_not_completed_no_claim")
 
 
 def read_state():
@@ -224,17 +278,8 @@ def prepare():
         print("SHADOW expired_no_model_call")
         return
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    run = event.get("workflow_run") or {}
-    source_id = run.get("id")
-    if type(source_id) is not int or source_id <= 0:
-        raise ShadowRejected("source_run_invalid")
-    source = gh(ROOT + f"/actions/runs/{source_id}")
-    if (source.get("repository", {}).get("full_name") != REPO or source.get("head_repository", {}).get("full_name") != REPO
-            or source.get("head_branch") != "main" or source.get("run_attempt") != 1
-            or source.get("path") != SOURCE_WORKFLOW or source.get("conclusion") != "success"
-            or source.get("event") not in ("push", "schedule", "workflow_dispatch")
-            or source.get("head_sha") != run.get("head_sha")):
-        raise ShadowRejected("untrusted_source_run")
+    source = resolve_source(event, os.environ.get("GITHUB_EVENT_NAME", "workflow_run"))
+    source_id = source["id"]
     data, sha = read_state()
     if len(data["slots"]) >= MAX_ATTEMPTS:
         print("SHADOW limit_reached_no_model_call")
@@ -387,7 +432,8 @@ def main():
                     "question_closed", "question_not_open_at_capture",
                     "snapshot_expired_before_reservation", "inference_permit_stale",
                     "capture_too_large_no_truncation", "slot_metadata_too_large_no_claim",
-                    "prompt_too_large_no_truncation", "request_too_large_no_truncation"}
+                    "prompt_too_large_no_truncation", "request_too_large_no_truncation",
+                    "source_not_completed_no_claim"}
         if str(error) in expected:
             print("SHADOW skipped_no_retry reason=" + str(error))
             return 0

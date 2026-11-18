@@ -1,5 +1,11 @@
 name: Vrchcab bounded OpenAI shadow comparison
 on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: First-attempt main production run with a fresh encrypted capture
+        required: true
+        type: string
   workflow_run:
     workflows: [Vrchcab automatic tournament forecasts]
     types: [completed]
@@ -15,9 +21,11 @@ jobs:
     if: >-
       github.repository == 'mcabejsek-creator/metac-bot-template' &&
       github.ref == 'refs/heads/main' && github.run_attempt == 1 &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.run_attempt == 1
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.run_attempt == 1))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
