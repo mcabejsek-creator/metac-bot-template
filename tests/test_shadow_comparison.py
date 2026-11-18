@@ -145,7 +145,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_twenty_spent_slots_block_before_download_or_model(self):
         source={'id':123,'repository':{'full_name':capture.REPO},'head_repository':{'full_name':capture.REPO},
-                'head_branch':'main','run_attempt':1,'path':worker.SOURCE_WORKFLOW,'conclusion':'success',
+                'head_branch':'main','run_attempt':1,'path':worker.SOURCE_WORKFLOW,'status':'completed','conclusion':'success',
                 'event':'workflow_dispatch','head_sha':'a'*40}
         with tempfile.TemporaryDirectory() as d:
             event=Path(d)/'event.json'
@@ -158,7 +158,7 @@ class PolicyTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]/'.github/workflows'
         w=yaml.load((root/'openai_shadow.yaml').read_text(),Loader=yaml.BaseLoader)
         p=yaml.load((root/'run_bot_automatic.yaml').read_text(),Loader=yaml.BaseLoader)
-        self.assertEqual(set(w['on']),{'workflow_run'})
+        self.assertEqual(set(w['on']),{'workflow_run','workflow_dispatch'})
         self.assertNotEqual(w['concurrency']['group'],p['concurrency']['group'])
         steps=w['jobs']['shadow']['steps']
         inference=next(s for s in steps if s.get('run','').endswith('shadow_runner.py infer'))

@@ -136,6 +136,40 @@ class ActionsConfigurationTests(OfflineTestCase):
             checkout = next(step for step in steps if step.get("uses", "").partition("@")[0] == "actions/checkout")
             self.assertEqual(checkout["with"]["persist-credentials"], "false")
 
+    def test_shadow_dispatch_requires_a_real_uploaded_verified_forecast(self):
+        workflow = self.workflows["run_bot_automatic.yaml"]
+        steps = workflow["jobs"]["forecast_job"]["steps"]
+        upload = next(s for s in steps if s.get("id") == "shadow_input")
+        dispatch = next(s for s in steps if s.get("name") == "Request isolated comparison for encrypted input")
+        self.assertLess(steps.index(upload), steps.index(dispatch))
+        self.assertLess(steps.index(dispatch), len(steps) - 1)
+        for guard in ("steps.bot.outcome == 'success'", "steps.bot.outputs.verified_forecasts == '1'",
+                      "steps.shadow_input.outcome == 'success'", "steps.shadow_input.outputs.artifact-id != ''"):
+            self.assertIn(guard, dispatch["if"])
+        self.assertEqual(dispatch["continue-on-error"], "true")
+        self.assertEqual(dispatch["timeout-minutes"], "1")
+        self.assertEqual(dispatch["run"], "python -B tools/dispatch_shadow.py")
+        self.assertEqual(set(dispatch["env"]), {"GITHUB_TOKEN", "VRCHCAB_VERIFIED_FORECASTS", "VRCHCAB_SHADOW_ARTIFACT_ID"})
+        self.assertIn("tests.test_shadow_dispatch", next(s for s in steps if s.get("id") == "offline_checks")["run"])
+        self.assertIn("tools/dispatch_shadow.py", workflow["on"]["push"]["paths"])
+
+    def test_both_shadow_triggers_share_one_scoped_worker_and_ledger_lock(self):
+        workflow = self.workflows["openai_shadow.yaml"]
+        self.assertEqual(set(workflow["on"]), {"workflow_dispatch", "workflow_run"})
+        inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+        self.assertEqual(set(inputs), {"source_run_id"})
+        self.assertEqual(inputs["source_run_id"]["type"], "string")
+        self.assertEqual(inputs["source_run_id"]["required"], "true")
+        self.assertEqual(workflow["permissions"], {"contents": "write", "actions": "read"})
+        self.assertEqual(workflow["concurrency"], {"group": "vrchcab-shadow-sol-20261117-${{ github.repository }}", "cancel-in-progress": "false"})
+        job = workflow["jobs"]["shadow"]
+        for guard in ("github.run_attempt == 1", "github.ref == 'refs/heads/main'",
+                      "github.event_name == 'workflow_dispatch'", "github.event_name == 'workflow_run'"):
+            self.assertIn(guard, job["if"])
+        infer = next(s for s in job["steps"] if s.get("run", "").endswith("shadow_runner.py infer"))
+        self.assertEqual(infer["env"], {"VRCHCAB_OPENAI_TEST_KEY": "${{ secrets.VRCHCAB_OPENAI_TEST_KEY }}"})
+        self.assertEqual(infer["if"], "steps.prepare.outputs.ready == 'true'")
+
     def test_all_active_actions_use_verified_official_commit_pins(self):
         reviewed = {"actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
             "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",

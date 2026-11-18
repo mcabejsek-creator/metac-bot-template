@@ -17,6 +17,15 @@ It never publishes challenger forecasts or promotes a model automatically.
 - `openai_shadow.yaml` processes that input in a separate workflow and separate
   concurrency group. The challenger sees frozen evidence and formatting
   instructions, never the baseline answer, rationale, later research or tools.
+- After a verified binary publication and successful encrypted upload, production
+  sends one explicit `workflow_dispatch` with its source run ID. This also works
+  for production passes created by the self-queue; their completion did not
+  reliably trigger the earlier `workflow_run`-only integration. The worker
+  checks the source through GitHub and waits at most thirty seconds for its
+  successful completion before any reservation. The existing `workflow_run`
+  trigger is retained, with the same concurrency lock and durable question
+  deduplication preventing a duplicate paid attempt. A failed or ambiguous
+  dispatch is not retried and does not interrupt the production successor.
 - The source must be a trusted first-attempt main production run. Stale inputs
   older than fifteen minutes, closed questions and oversized inputs are skipped.
   After a verified publication, the existing production successor starts
