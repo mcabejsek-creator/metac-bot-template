@@ -6,6 +6,8 @@ on:
       - 'tests/test_shadow*.py'
       - 'tests/test_github_workflows.py'
       - 'tools/dispatch_shadow.py'
+      - 'tools/queue_next_automatic.py'
+      - 'tests/test_queue_next_automatic.py'
       - '.github/workflows/openai_shadow.yaml'
       - '.github/workflows/shadow_report.yaml'
       - '.github/workflows/shadow_offline.yaml'
@@ -29,6 +31,8 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
       - run: poetry install --no-interaction --no-root
+      - name: Focused offline automatic queue tests
+        run: poetry run python -B -m unittest tests.test_queue_next_automatic -v
       - name: Focused offline shadow tests
         run: poetry run python -B -m unittest tests.test_shadow_comparison tests.test_shadow_pipeline tests.test_shadow_runner_followup tests.test_shadow_ledger_size tests.test_shadow_evaluate tests.test_shadow_report tests.test_shadow_dispatch -v
       - name: All existing and new regressions

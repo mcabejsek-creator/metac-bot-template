@@ -2,7 +2,8 @@
 
 GitHub explicitly allows GITHUB_TOKEN to trigger workflow_dispatch events.
 The workflow supplies actions:write and the same publication concurrency lock.
-Native cron remains the fallback if this single attempt fails. No HTTP retries.
+Native cron remains the fallback if this single dispatch attempt fails. Only a
+matching run's pending status is polled briefly; failed requests are not retried.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,9 @@ ROOT = "https://api.github.com/repos/" + REPOSITORY
 INTERVAL_SECONDS = 15 * 60
 MAX_BYTES = 5_000_000
 ALLOWED_EVENTS = {"push", "schedule", "workflow_dispatch"}
+PENDING_STATES = {"queued", "pending", "waiting", "requested"}
+RUN_STATUS_READS = 3
+RUN_STATUS_POLL_SECONDS = 5
 
 
 class QueueNextError(RuntimeError):
@@ -98,18 +102,44 @@ def _context(environ):
     return int(environ["GITHUB_RUN_ID"])
 
 
-def _validate_own_run(run, run_id, environ):
-    if (run.get("id") != run_id or type(run.get("id")) is not int
-            or run.get("run_attempt") != 1
-            or run.get("repository", {}).get("full_name") != REPOSITORY
-            or run.get("path") != WORKFLOW_PATH
-            or run.get("head_branch") != "main"
-            or run.get("head_sha") != environ["GITHUB_SHA"]
-            or run.get("event") != environ["GITHUB_EVENT_NAME"]
-            or run.get("status") != "in_progress"
-            or type(run.get("workflow_id")) is not int):
-        raise QueueNextError("Current automatic workflow identity/state is not verified")
-    return _moment(run.get("run_started_at"))
+def _validate_own_run_identity(run, run_id, environ, workflow_id):
+    if not isinstance(run, dict):
+        raise QueueNextError("Current automatic workflow identity mismatch: response")
+    repository = run.get("repository")
+    checks = {
+        "id": type(run.get("id")) is int and run["id"] == run_id,
+        "run_attempt": type(run.get("run_attempt")) is int and run["run_attempt"] == 1,
+        "repository": isinstance(repository, dict) and repository.get("full_name") == REPOSITORY,
+        "path": run.get("path") == WORKFLOW_PATH,
+        "head_branch": run.get("head_branch") == "main",
+        "head_sha": run.get("head_sha") == environ["GITHUB_SHA"],
+        "event": run.get("event") == environ["GITHUB_EVENT_NAME"],
+        "workflow_id": (type(run.get("workflow_id")) is int and run["workflow_id"] > 0
+                        and (workflow_id is None or run["workflow_id"] == workflow_id)),
+    }
+    mismatches = [field for field, valid in checks.items() if not valid]
+    if mismatches:
+        # Only fixed field names are logged; never echo response values.
+        raise QueueNextError("Current automatic workflow identity mismatch: " + ", ".join(mismatches))
+
+
+def _read_running_own_run(api, run_id, environ, sleep, *, workflow_id=None):
+    for attempt in range(RUN_STATUS_READS):
+        current = api.own_run(run_id)
+        _validate_own_run_identity(current, run_id, environ, workflow_id)
+        workflow_id = current["workflow_id"]
+        status = current.get("status")
+        if status == "in_progress":
+            return current, _moment(current.get("run_started_at"))
+        # A brief API visibility delay must not relax identity or cancellation
+        # checks. Transport errors and completed/unknown states fail immediately.
+        if not isinstance(status, str) or status not in PENDING_STATES:
+            label = "completed" if status == "completed" else "unknown"
+            raise QueueNextError("Current automatic workflow state is not in_progress: " + label)
+        if attempt + 1 == RUN_STATUS_READS:
+            raise QueueNextError("Current automatic workflow state remained " + status
+                                 + " after bounded status checks")
+        sleep(RUN_STATUS_POLL_SECONDS)
 
 
 def queue_next(environ=None, *, api=None, now=None, sleep=time.sleep):
@@ -117,8 +147,7 @@ def queue_next(environ=None, *, api=None, now=None, sleep=time.sleep):
     run_id = _context(environ)
     api = api or GitHub(environ.get("GITHUB_TOKEN", ""))
     now = now or (lambda: datetime.now(timezone.utc))
-    current = api.own_run(run_id)
-    started = _validate_own_run(current, run_id, environ)
+    current, started = _read_running_own_run(api, run_id, environ, sleep)
     moment = now()
     if started > moment + timedelta(seconds=30):
         raise QueueNextError("GitHub run start time is in the future")
@@ -135,10 +164,7 @@ def queue_next(environ=None, *, api=None, now=None, sleep=time.sleep):
         remaining -= seconds
 
     # Recheck cancellation and identity after the wait, before any dispatch.
-    latest_current = api.own_run(run_id)
-    _validate_own_run(latest_current, run_id, environ)
-    if latest_current.get("workflow_id") != current["workflow_id"]:
-        raise QueueNextError("Current workflow identity changed")
+    _read_running_own_run(api, run_id, environ, sleep, workflow_id=current["workflow_id"])
     envelope = api.workflow_runs()
     runs = envelope.get("workflow_runs")
     if not isinstance(runs, list) or len(runs) > 100:
