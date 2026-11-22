@@ -32,9 +32,10 @@ def record(event="workflow_dispatch", **changes):
 
 
 class FakeGitHub:
-    def __init__(self, *, event="workflow_dispatch", newer=None):
+    def __init__(self, *, event="workflow_dispatch", newer=None, own_runs=None):
         self.current = record(event)
         self.newer = [] if newer is None else newer
+        self.own_runs = [] if own_runs is None else list(own_runs)
         self.reads = 0
         self.posts = 0
         self.error = None
@@ -42,6 +43,8 @@ class FakeGitHub:
     def own_run(self, run_id):
         assert run_id == 200
         self.reads += 1
+        if self.own_runs:
+            self.current = self.own_runs.pop(0)
         return self.current
 
     def workflow_runs(self):
@@ -114,6 +117,101 @@ class QueueNextTests(unittest.TestCase):
         with self.assertRaises(QueueNextError):
             queue_next(environment(), api=fake, now=lambda: NOW, sleep=cancel)
         self.assertEqual(fake.posts, 0)
+
+    def test_pending_status_can_become_running_at_either_validation(self):
+        for status in ("queued", "pending", "waiting", "requested"):
+            for initial in (True, False):
+                with self.subTest(status=status, initial=initial):
+                    sequence = ([record(status=status), record(), record()] if initial
+                                else [record(), record(status=status), record()])
+                    fake, waits = FakeGitHub(own_runs=sequence), []
+                    result = queue_next(environment(), api=fake,
+                        now=lambda: NOW + timedelta(seconds=1500), sleep=waits.append)
+                    self.assertEqual(waits, [5])
+                    self.assertEqual(fake.reads, 3)
+                    self.assertEqual(fake.posts, 1)
+                    self.assertEqual(result["status"], "one_successor_requested")
+
+    def test_persistent_pending_status_stops_within_bound_at_either_validation(self):
+        for initial in (True, False):
+            with self.subTest(initial=initial):
+                prefix = [] if initial else [record()]
+                fake = FakeGitHub(own_runs=prefix + [record(status="queued")] * 3)
+                waits = []
+                with self.assertRaisesRegex(QueueNextError, "remained queued after bounded status checks"):
+                    queue_next(environment(), api=fake,
+                        now=lambda: NOW + timedelta(seconds=1500), sleep=waits.append)
+                self.assertEqual(waits, [5, 5])
+                self.assertEqual(fake.reads, 3 + len(prefix))
+                self.assertEqual(fake.posts, 0)
+
+    def test_identity_mismatch_is_not_polled_and_diagnostics_do_not_echo_values(self):
+        cases = (({"id": "200"}, "id"), ({"run_attempt": True}, "run_attempt"),
+                 ({"repository": None}, "repository"), ({"path": "other.yml"}, "path"),
+                 ({"head_branch": "feature"}, "head_branch"), ({"head_sha": "b" * 40}, "head_sha"),
+                 ({"event": "private synthetic response value"}, "event"),
+                 ({"workflow_id": True}, "workflow_id"), ({"workflow_id": 0}, "workflow_id"))
+        for changes, field in cases:
+            with self.subTest(field=field, changes=changes):
+                fake = FakeGitHub(own_runs=[record(status="queued", **changes)])
+                waits = []
+                with self.assertRaises(QueueNextError) as caught:
+                    queue_next(environment(), api=fake, now=lambda: NOW, sleep=waits.append)
+                self.assertEqual(str(caught.exception),
+                                 "Current automatic workflow identity mismatch: " + field)
+                self.assertEqual(fake.reads, 1)
+                self.assertEqual(waits, [])
+                self.assertEqual(fake.posts, 0)
+
+    def test_workflow_identity_is_pinned_across_status_polls_and_idle_wait(self):
+        cases = (([record(status="queued"), record(workflow_id=888)], [5]),
+                 ([record(), record(status="pending", workflow_id=888)], []),
+                 ([record(), record(status="pending"), record(workflow_id=888)], [5]))
+        for sequence, expected_waits in cases:
+            with self.subTest(sequence=sequence):
+                fake, waits = FakeGitHub(own_runs=sequence), []
+                with self.assertRaisesRegex(QueueNextError, "identity mismatch: workflow_id"):
+                    queue_next(environment(), api=fake,
+                        now=lambda: NOW + timedelta(seconds=1500), sleep=waits.append)
+                self.assertEqual(fake.reads, len(sequence))
+                self.assertEqual(waits, expected_waits)
+                self.assertEqual(fake.posts, 0)
+
+    def test_completed_unknown_or_cancelled_run_cannot_recover_via_status_polling(self):
+        for status in ("completed", "cancelled", "private synthetic response value", None, []):
+            with self.subTest(status=status):
+                fake = FakeGitHub(own_runs=[record(status="queued"),
+                    record(status=status, conclusion="cancelled")])
+                waits = []
+                with self.assertRaises(QueueNextError) as caught:
+                    queue_next(environment(), api=fake,
+                        now=lambda: NOW + timedelta(seconds=1500), sleep=waits.append)
+                label = "completed" if status == "completed" else "unknown"
+                self.assertEqual(str(caught.exception),
+                                 "Current automatic workflow state is not in_progress: " + label)
+                self.assertEqual(fake.reads, 2)
+                self.assertEqual(waits, [5])
+                self.assertEqual(fake.posts, 0)
+
+    def test_failed_get_is_not_retried_and_uncertain_post_is_not_repeated(self):
+        class ReadFailure(FakeGitHub):
+            def own_run(self, run_id):
+                super().own_run(run_id)
+                raise QueueNextError("Synthetic unavailable GET")
+        fake, waits = ReadFailure(), []
+        with self.assertRaisesRegex(QueueNextError, "Synthetic unavailable GET"):
+            queue_next(environment(), api=fake, now=lambda: NOW, sleep=waits.append)
+        self.assertEqual(fake.reads, 1)
+        self.assertEqual(waits, [])
+        self.assertEqual(fake.posts, 0)
+
+        fake = FakeGitHub(own_runs=[record(status="queued"), record(), record()])
+        fake.error = QueueNextError("Synthetic uncertain POST")
+        with self.assertRaisesRegex(QueueNextError, "Synthetic uncertain POST"):
+            queue_next(environment(), api=fake,
+                now=lambda: NOW + timedelta(seconds=1500), sleep=lambda _: None)
+        self.assertEqual(fake.reads, 3)
+        self.assertEqual(fake.posts, 1)
 
     def test_single_fixed_dispatch_and_no_retry_after_uncertain_http_outcome(self):
         class Reply:
