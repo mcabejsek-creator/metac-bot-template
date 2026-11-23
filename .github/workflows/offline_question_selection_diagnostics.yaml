@@ -1,0 +1,59 @@
+# Offline only. Does not run main.py, does not access any secrets, and cannot publish.
+name: Offline question selection diagnostics (no publishing)
+
+on:
+  pull_request:
+    paths:
+      - "tools/diagnose_question_selection_offline.py"
+      - "tools/probe_open_questions_readonly.py"
+      - "tools/probe_open_questions_authenticated.py"
+      - "tools/check_bulk_read_method_offline.py"
+      - "tools/project_history_inventory_readonly.py"
+      - "tools/test_project_history_inventory_offline.py"
+      - "tools/check_existing_metaculus_token_owner_readonly.py"
+      - ".github/workflows/offline_question_selection_diagnostics.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      METACULUS_TOKEN: ""
+      PERPLEXITY_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      EXA_API_KEY: ""
+      ASKNEWS_API_KEY: ""
+      ASKNEWS_CLIENT_ID: ""
+      ASKNEWS_SECRET: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install locked dependencies
+        run: poetry install --no-interaction --no-root
+      - name: Diagnose SDK selection without network or credentials
+        run: poetry run python -B tools/diagnose_question_selection_offline.py
+      - name: Verify public GET probe safety (no network calls)
+        run: poetry run python -B tools/probe_open_questions_readonly.py --self-check
+      - name: Verify authorized GET probe shape (no network)
+        run: poetry run python -B tools/probe_open_questions_authenticated.py --self-check
+      - name: Compare historical audit method to installed SDK offline
+        run: poetry run python -B tools/check_bulk_read_method_offline.py
+      - name: Verify project-scoped audit uses strict query contract (offline)
+        run: poetry run python -B tools/project_history_inventory_readonly.py --self-check
+      - name: Test inventory response validation and fail-closed HTTP 429 (offline)
+        run: poetry run python -B tools/test_project_history_inventory_offline.py
+      - name: Verify canonical token owner endpoint without network or credentials
+        run: poetry run python -B tools/check_existing_metaculus_token_owner_readonly.py --self-check
