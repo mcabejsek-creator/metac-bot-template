@@ -348,6 +348,12 @@ class HelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Corrected report", result)
         self.assertIn("not instructions", prompts[-1])
         self.assertIn("Initial sourced report", prompts[-1])
+        # A synthetic prior report alone must not certify a mismatched or future filing.
+        self.assertIn("precise reporting entity", prompts[0])
+        self.assertIn("document filing/release date", prompts[0])
+        self.assertIn("reporting period or treat a record released after forecast time", prompts[-1])
+        self.assertIn("identity or contemporaneous publication", prompts[-1])
+        self.assertEqual(len(prompts), 4)  # Two planners and two sponsored syntheses.
 
     async def test_fact_check_can_verify_original_values_even_after_cached_restart(self):
         storage, calls, prompts = MemoryStorage(), [], []
