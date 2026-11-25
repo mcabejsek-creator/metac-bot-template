@@ -130,6 +130,28 @@ class ActionsConfigurationTests(OfflineTestCase):
             self.assertNotIn(secret, workflow.get("env", {}))
             self.assertNotIn(secret, job.get("env", {}))
 
+    def test_stalled_recovery_extends_existing_recovery_without_model_credentials(self):
+        workflow = self.workflows["recover_automatic_startup.yaml"]
+        self.assertEqual(workflow["permissions"], {"contents": "read", "actions": "write"})
+        self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
+        self.assertEqual(workflow["on"]["schedule"], [{"cron": "11,41 * * * *"}])
+        self.assertIn("Vrchcab automatic tournament forecasts", workflow["on"]["workflow_run"]["workflows"])
+        self.assertIn("Vrchcab hourly full backlog scan (GET only)", workflow["on"]["workflow_run"]["workflows"])
+        self.assertIn("Review forecast quality and automatic operation", workflow["on"]["workflow_run"]["workflows"])
+        self.assertIn("startup_failure", workflow["jobs"]["recover"]["if"])
+        job = workflow["jobs"]["recover_stalled"]
+        for gate in ("github.ref == 'refs/heads/main'", "github.run_attempt == 1",
+                     "github.event.workflow_run.event == 'schedule'"):
+            self.assertIn(gate, job["if"])
+        self.assertEqual(job["steps"][0]["with"]["persist-credentials"], "false")
+        self.assertIn("test_recover_automatic_startup.py", job["steps"][-2]["run"])
+        self.assertEqual(job["steps"][-1]["run"], "python -B tools/recover_automatic_startup.py --stale")
+        self.assertEqual(job["steps"][-1]["env"], {"GITHUB_TOKEN": "${{ github.token }}"})
+        self.assertNotIn("secrets.", str(job))
+        for path in ("tools/recover_automatic_startup.py", "tests/test_recover_automatic_startup.py",
+                     ".github/workflows/recover_automatic_startup.yaml", "tests/test_github_workflows.py"):
+            self.assertIn(path, self.workflows["offline_bounded_pagination.yaml"]["on"]["pull_request"]["paths"])
+
     def test_source_checkout_does_not_persist_state_write_credentials(self):
         for name in (*self.publishers, "initialize_publication_state.yaml"):
             steps = next(iter(self.workflows[name]["jobs"].values()))["steps"]

@@ -8,7 +8,7 @@ import urllib.error
 
 from tools.recover_automatic_startup import (
     GitHub, RECOVERY_PATH, REPOSITORY, ROOT, RecoveryUnavailable,
-    WORKFLOW, WORKFLOW_PATH, _NoRedirect, recover,
+    WORKFLOW, WORKFLOW_PATH, _NoRedirect, recover, recover_stale, ACTIVE, WAKE_PATHS, STALE_AFTER,
 )
 
 
@@ -200,6 +200,183 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(opener.calls), 2)
         with self.assertRaises(RecoveryUnavailable):
             _NoRedirect().redirect_request(None)
+
+
+
+class StaleGitHub(FakeGitHub):
+    def __init__(self, conclusion="failure"):
+        super().__init__()
+        old = (NOW - timedelta(minutes=60)).isoformat()
+        self.source = record(conclusion=conclusion, created_at=old, updated_at=old,
+                             head_sha="a" * 40)
+        self.runs = [copy.deepcopy(self.source)]
+        self.workflow_result = {"id": 123, "path": WORKFLOW_PATH, "state": "active"}
+        self.active = {}
+        self.final_runs = None
+        self.final_workflow = None
+        self.read_count = 0
+        self.workflow_count = 0
+        self.jobs_result = {"total_count": 1, "jobs": [{
+            "run_id": 200, "name": "forecast_job", "status": "completed",
+            "conclusion": conclusion, "steps": [
+                {"name": name, "number": number, "status": "completed", "conclusion": outcome}
+                for name, number, outcome in (
+                    ("Offline publication regressions", 6, "success"),
+                    ("Run bot", 7, "success"),
+                    ("Queue next automatic pass", 10, conclusion))]}]}
+
+    def workflow(self):
+        self.gets.append(("workflow", None))
+        self.workflow_count += 1
+        return self.final_workflow if self.workflow_count > 1 and self.final_workflow is not None else self.workflow_result
+
+    def recent_runs(self):
+        self.read_count += 1
+        if self.read_count > 1 and self.final_runs is not None:
+            self.gets.append(("recent", None))
+            return {"total_count": len(self.final_runs), "workflow_runs": self.final_runs}
+        return super().recent_runs()
+
+    def active_runs(self, status):
+        self.gets.append(("active", status))
+        return self.active.get(status, {"total_count": 0, "workflow_runs": []})
+
+
+class StaleRecoveryTests(unittest.TestCase):
+    def attempt(self, api, *, env=None, payload=None):
+        if env is None:
+            env = environment()
+            env["GITHUB_EVENT_NAME"] = "schedule"
+        return recover_stale(env, event=payload, api=api, now=NOW)
+
+    def test_stalled_after_successful_bot_and_failed_successor(self):
+        api = StaleGitHub()
+        self.assertEqual(self.attempt(api)["status"], "one_fresh_automatic_run_requested")
+        self.assertEqual(api.posts, 1)
+        self.assertEqual(len(api.gets), 11)
+        self.assertEqual(api.gets[-2:], [("recent", None), ("workflow", None)])
+
+    def test_successful_run_with_no_later_run_can_recover(self):
+        api = StaleGitHub("success")
+        self.assertEqual(self.attempt(api)["status"], "one_fresh_automatic_run_requested")
+        self.assertEqual(api.posts, 1)
+
+    def test_recent_or_active_or_disabled_blocks(self):
+        for kind in ("recent", "active", "disabled", "empty", "cancelled", "rerun"):
+            api = StaleGitHub()
+            if kind == "recent":
+                api.runs[0]["updated_at"] = (NOW - STALE_AFTER + timedelta(seconds=1)).isoformat()
+            elif kind == "active":
+                api.runs[0].update(status="in_progress", conclusion=None)
+            elif kind == "disabled":
+                api.workflow_result["state"] = "disabled_manually"
+            elif kind == "empty":
+                api.runs = []
+            elif kind == "cancelled":
+                api.runs[0]["conclusion"] = "cancelled"
+            elif kind == "rerun":
+                api.runs[0]["run_attempt"] = 2
+            with self.subTest(kind=kind):
+                self.assertNotEqual(self.attempt(api)["status"], "one_fresh_automatic_run_requested")
+                self.assertEqual(api.posts, 0)
+
+    def test_older_active_run_outside_recent_page_blocks(self):
+        for state in ACTIVE:
+            api = StaleGitHub()
+            api.active[state] = {"total_count": 1, "workflow_runs": [{"id": 1}]}
+            self.assertEqual(self.attempt(api)["status"], "automatic_run_active")
+            self.assertEqual(api.posts, 0)
+
+    def test_failed_bot_or_offline_guard_never_recovers(self):
+        for name in ("Run bot", "Offline publication regressions"):
+            api = StaleGitHub()
+            next(step for step in api.jobs_result["jobs"][0]["steps"] if step["name"] == name)["conclusion"] = "failure"
+            self.assertEqual(self.attempt(api)["status"], "latest_job_not_safe_for_recovery")
+            self.assertEqual(api.posts, 0)
+
+    def test_jobless_startup_failure_after_stall_recovers(self):
+        api = StaleGitHub("startup_failure")
+        api.jobs_result = {"total_count": 0, "jobs": []}
+        self.assertEqual(self.attempt(api)["status"], "one_fresh_automatic_run_requested")
+        self.assertEqual(api.posts, 1)
+
+    def test_latest_changed_during_reads_blocks(self):
+        for kind in ("direct", "newer", "active", "disabled"):
+            api = StaleGitHub()
+            if kind == "direct":
+                api.source["updated_at"] = (NOW - timedelta(minutes=50)).isoformat()
+            elif kind == "newer":
+                api.final_runs = [dict(api.runs[0], id=201), api.runs[0]]
+            elif kind == "active":
+                api.final_runs = [dict(api.runs[0], id=201, status="queued", conclusion=None), api.runs[0]]
+            elif kind == "disabled":
+                api.final_workflow = dict(api.workflow_result, state="disabled_manually")
+            with self.subTest(kind=kind):
+                self.assertNotEqual(self.attempt(api)["status"], "one_fresh_automatic_run_requested")
+                self.assertEqual(api.posts, 0)
+
+    def test_malformed_or_partial_inventory_denies(self):
+        for kind in ("partial", "duplicate", "future", "active_count"):
+            api = StaleGitHub()
+            if kind == "partial":
+                api.total = 101
+            elif kind == "duplicate":
+                api.runs.append(copy.deepcopy(api.runs[0]))
+            elif kind == "future":
+                api.runs[0]["updated_at"] = (NOW + timedelta(hours=1)).isoformat()
+            elif kind == "active_count":
+                api.active["queued"] = {"total_count": 1, "workflow_runs": []}
+            with self.subTest(kind=kind), self.assertRaises(RecoveryUnavailable):
+                self.attempt(api)
+            self.assertEqual(api.posts, 0)
+
+    def test_no_repeat_after_uncertain_dispatch(self):
+        api = StaleGitHub()
+        api.dispatch_error = RecoveryUnavailable("synthetic timeout")
+        with self.assertRaises(RecoveryUnavailable):
+            self.attempt(api)
+        self.assertEqual(api.posts, 1)
+
+    def test_get_failure_is_not_retried(self):
+        api = StaleGitHub()
+        def unavailable():
+            api.gets.append(("recent", None))
+            raise RecoveryUnavailable("synthetic GET")
+        api.recent_runs = unavailable
+        with self.assertRaises(RecoveryUnavailable):
+            self.attempt(api)
+        self.assertEqual(api.gets, [("workflow", None), ("recent", None)])
+        self.assertEqual(api.posts, 0)
+
+    def test_untrusted_context_and_credentials_deny_before_reads(self):
+        for key, val in (("GITHUB_REF", "refs/heads/feature"), ("GITHUB_RUN_ATTEMPT", "2"),
+                         ("GITHUB_EVENT_NAME", "workflow_dispatch"), ("METACULUS_TOKEN", "fake"),
+                         ("OPENROUTER_API_KEY", "fake"), ("VRCHCAB_OPENAI_TEST_KEY", "fake")):
+            api, env = StaleGitHub(), environment()
+            env["GITHUB_EVENT_NAME"] = "schedule"
+            env[key] = val
+            with self.subTest(key=key), self.assertRaises(RecoveryUnavailable):
+                self.attempt(api, env=env)
+            self.assertEqual(api.gets, [])
+            self.assertEqual(api.posts, 0)
+
+    def test_scheduled_monitor_wakeup_not_manual_or_production(self):
+        for path in WAKE_PATHS:
+            api, payload = StaleGitHub(), event()
+            payload["workflow_run"].update(path=path, event="schedule", conclusion="success")
+            self.assertEqual(self.attempt(api, env=environment(), payload=payload)["status"],
+                             "one_fresh_automatic_run_requested")
+            self.assertEqual(api.posts, 1)
+        for changes in ({"path": WORKFLOW_PATH}, {"event": "workflow_dispatch"},
+                        {"head_branch": "feature"}, {"run_attempt": 2},
+                        {"head_repository": {"full_name": "fork/repo"}}):
+            api, payload = StaleGitHub(), event()
+            payload["workflow_run"].update(path=sorted(WAKE_PATHS)[0], event="schedule", conclusion="failure")
+            payload["workflow_run"].update(changes)
+            with self.subTest(changes=changes), self.assertRaises(RecoveryUnavailable):
+                self.attempt(api, env=environment(), payload=payload)
+            self.assertEqual(api.gets, [])
+            self.assertEqual(api.posts, 0)
 
 
 if __name__ == "__main__":

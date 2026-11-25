@@ -1,10 +1,11 @@
-"""Recover an automatic workflow that failed before any job existed.
+"""Recover a jobless startup failure or a demonstrably stalled automatic chain.
 
 This is one fresh workflow_dispatch, never a rerun or a publication retry.
 It cannot recover an outage that also prevents GitHub Actions/webhook delivery.
 Only the temporary GitHub token is used; no model or Metaculus access.
 """
 
+import argparse
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -21,6 +22,11 @@ RECOVERY_PATH = ".github/workflows/recover_automatic_startup.yaml"
 ROOT = "https://api.github.com/repos/" + REPOSITORY
 WINDOW = timedelta(hours=1)
 MAX_STARTUP_FAILURES = 3
+STALE_AFTER = timedelta(minutes=45)
+WAKE_PATHS = {
+    ".github/workflows/readonly_backlog_hourly.yaml",
+    ".github/workflows/review_bot.yaml",
+}
 MAX_BYTES = 5_000_000
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
 SOURCE_EVENTS = {"push", "schedule", "workflow_dispatch"}
@@ -36,7 +42,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class GitHub:
-    """Three fixed GETs and at most one POST, with no retry or redirect."""
+    """Fixed GitHub GETs and at most one POST per recovery, no retry or redirect."""
 
     def __init__(self, token, *, opener=None):
         if not isinstance(token, str) or not token or any(c.isspace() for c in token):
@@ -77,6 +83,15 @@ class GitHub:
     def recent_runs(self):
         return self._request("/actions/workflows/" + WORKFLOW + "/runs?branch=main&per_page=100")
 
+    def workflow(self):
+        return self._request("/actions/workflows/" + WORKFLOW)
+
+    def active_runs(self, status):
+        if status not in ACTIVE:
+            raise RecoveryUnavailable("Unknown active run filter")
+        return self._request("/actions/workflows/" + WORKFLOW
+                             + "/runs?branch=main&status=" + status + "&per_page=1")
+
     def dispatch(self):
         return self._request("/actions/workflows/" + WORKFLOW + "/dispatches", dispatch=True)
 
@@ -91,10 +106,10 @@ def _time(value):
         raise RecoveryUnavailable("GitHub recovery timestamp unavailable") from None
 
 
-def _context(env):
+def _context(env, allowed_events=("workflow_run",)):
     if (env.get("GITHUB_ACTIONS") != "true" or env.get("GITHUB_REPOSITORY") != REPOSITORY
             or env.get("GITHUB_REF") != "refs/heads/main" or env.get("GITHUB_RUN_ATTEMPT") != "1"
-            or env.get("GITHUB_EVENT_NAME") != "workflow_run"
+            or env.get("GITHUB_EVENT_NAME") not in allowed_events
             or env.get("GITHUB_WORKFLOW_REF") != REPOSITORY + "/" + RECOVERY_PATH + "@refs/heads/main"
             or not re.fullmatch(r"[1-9][0-9]*", env.get("GITHUB_RUN_ID", ""))
             or not re.fullmatch(r"[a-f0-9]{40}", env.get("GITHUB_SHA", ""))):
@@ -191,9 +206,192 @@ def recover(environ=None, *, event=None, api=None, now=None):
             "workflow": WORKFLOW, "ref": "main", "startup_failures_last_hour": failures}
 
 
-def main():
+
+def _wake_event(env, event):
+    # Scheduled checks are authorized by the fixed main workflow context.
+    # A monitoring completion is only a wake-up, never publication evidence.
+    if env["GITHUB_EVENT_NAME"] == "schedule":
+        return
+    if event is None:
+        try:
+            with Path(env["GITHUB_EVENT_PATH"]).open("rb") as handle:
+                raw = handle.read(MAX_BYTES + 1)
+                if len(raw) > MAX_BYTES:
+                    raise ValueError()
+            event = json.loads(raw)
+        except (KeyError, OSError, ValueError):
+            raise RecoveryUnavailable("Recovery wake event unavailable") from None
+    if (not isinstance(event, dict) or event.get("action") != "completed"
+            or not isinstance(event.get("repository"), dict)
+            or event["repository"].get("full_name") != REPOSITORY):
+        raise RecoveryUnavailable("Untrusted recovery wake event")
+    source = event.get("workflow_run")
+    if (not isinstance(source, dict) or type(source.get("id")) is not int
+            or source["id"] <= 0 or source.get("path") not in WAKE_PATHS
+            or source.get("event") != "schedule" or source.get("head_branch") != "main"
+            or type(source.get("run_attempt")) is not int or source["run_attempt"] != 1
+            or source.get("status") != "completed"
+            or source.get("conclusion") not in {"success", "failure"}
+            or not isinstance(source.get("repository"), dict)
+            or source["repository"].get("full_name") != REPOSITORY
+            or not isinstance(source.get("head_repository"), dict)
+            or source["head_repository"].get("full_name") != REPOSITORY):
+        raise RecoveryUnavailable("Wake source is not a trusted scheduled monitor")
+
+
+def _workflow_id(workflow):
+    if (not isinstance(workflow, dict) or workflow.get("path") != WORKFLOW_PATH
+            or type(workflow.get("id")) is not int or workflow["id"] <= 0
+            or not isinstance(workflow.get("state"), str)):
+        raise RecoveryUnavailable("Automatic workflow identity unavailable")
+    return workflow["id"] if workflow["state"] == "active" else None
+
+
+def _checked_stale_record(run, workflow_id, now):
+    created, updated = _validate_run(run, workflow_id)
+    if (created > updated or updated > now + timedelta(seconds=30)
+            or not isinstance(run.get("head_sha"), str)
+            or not re.fullmatch(r"[a-f0-9]{40}", run["head_sha"])):
+        raise RecoveryUnavailable("Invalid automatic run timestamps or revision")
+    return created, updated
+
+
+def _stale_candidate(page, workflow_id, now):
+    if not isinstance(page, dict):
+        raise RecoveryUnavailable("Recent automatic inventory unavailable")
+    runs, total = page.get("workflow_runs"), page.get("total_count")
+    if (not isinstance(runs, list) or type(total) is not int or total < 0
+            or len(runs) != min(total, 100)):
+        raise RecoveryUnavailable("Recent automatic inventory incomplete")
+    if not runs:
+        return None, "no_previous_automatic_run"
+    checked, ids = [], set()
+    for run in runs:
+        created, updated = _checked_stale_record(run, workflow_id, now)
+        if run["id"] in ids:
+            raise RecoveryUnavailable("Duplicate automatic run")
+        ids.add(run["id"])
+        checked.append((run, created, updated))
+    if any(run["status"] in ACTIVE for run, _, _ in checked):
+        return None, "automatic_run_active"
+    latest, created, updated = max(checked, key=lambda item: (item[1], item[0]["id"]))
+    if any(run["id"] > latest["id"] for run, _, _ in checked):
+        raise RecoveryUnavailable("Latest automatic run identity ambiguous")
+    if now - max(changed for _, _, changed in checked) < STALE_AFTER:
+        return None, "automatic_run_recent"
+    if (latest["run_attempt"] != 1 or latest.get("conclusion")
+            not in {"success", "failure", "startup_failure"}):
+        return None, "latest_automatic_run_not_recoverable"
+    if latest.get("conclusion") == "startup_failure":
+        cutoff = now - WINDOW
+        if total > len(runs) and min(start for _, start, _ in checked) > cutoff:
+            raise RecoveryUnavailable("Run sample does not cover startup failure window")
+        if sum(run.get("conclusion") == "startup_failure" and changed >= cutoff
+               for run, _, changed in checked) >= MAX_STARTUP_FAILURES:
+            return None, "startup_failure_hourly_limit"
+    return latest, "stale_automatic_run"
+
+
+def _same_run(a, b):
+    return all(a.get(key) == b.get(key) for key in
+               ("id", "workflow_id", "head_sha", "run_attempt", "event",
+                "status", "conclusion", "created_at", "updated_at"))
+
+
+def _safe_finished_job(source, envelope):
+    if not isinstance(envelope, dict):
+        raise RecoveryUnavailable("Automatic job evidence unavailable")
+    count, jobs = envelope.get("total_count"), envelope.get("jobs")
+    if type(count) is not int or not isinstance(jobs, list):
+        raise RecoveryUnavailable("Automatic job inventory malformed")
+    if source["conclusion"] == "startup_failure":
+        return count == 0 and jobs == []
+    if count != 1 or len(jobs) != 1:
+        return False
+    job = jobs[0]
+    if (not isinstance(job, dict) or type(job.get("run_id")) is not int
+            or job["run_id"] != source["id"] or job.get("name") != "forecast_job"
+            or job.get("status") != "completed"
+            or job.get("conclusion") != source["conclusion"]):
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    expected = {"Offline publication regressions": "success", "Run bot": "success",
+                "Queue next automatic pass": source["conclusion"]}
+    numbers = []
+    for name, conclusion in expected.items():
+        matching = [step for step in steps if isinstance(step, dict) and step.get("name") == name]
+        if (len(matching) != 1 or matching[0].get("status") != "completed"
+                or matching[0].get("conclusion") != conclusion
+                or type(matching[0].get("number")) is not int or matching[0]["number"] <= 0):
+            return False
+        numbers.append(matching[0]["number"])
+    return numbers == sorted(set(numbers))
+
+
+def recover_stale(environ=None, *, event=None, api=None, now=None):
+    """At most eleven fixed GETs, one fresh dispatch, no in-check retry.
+
+    Repeated wakeups are fresh observations, not replay of a model or
+    publication operation. The existing production lock/journal and budget
+    still apply. GitHub's reads are not linearizable: we cannot promise a
+    unique dispatch relative to native cron or across an API outage.
+    """
+    env = os.environ if environ is None else environ
+    _context(env, ("schedule", "workflow_run"))
+    if any(env.get(key) for key in ("METACULUS_TOKEN", "METACULUS_TOKEN_V2",
+           "PERPLEXITY_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY",
+           "VRCHCAB_OPENAI_TEST_KEY")):
+        raise RecoveryUnavailable("Recovery credential isolation failed")
+    _wake_event(env, event)
+    api = api or GitHub(env.get("GITHUB_TOKEN", ""))
+    clock = (lambda: datetime.now(timezone.utc)) if now is None else (lambda: now)
+    workflow_id = _workflow_id(api.workflow())
+    if workflow_id is None:
+        return {"status": "automatic_workflow_not_active"}
+    source, reason = _stale_candidate(api.recent_runs(), workflow_id, clock())
+    if source is None:
+        return {"status": reason}
+    direct = api.run(source["id"])
+    _checked_stale_record(direct, workflow_id, clock())
+    if not _same_run(source, direct):
+        return {"status": "automatic_run_changed"}
+    # Do not automatically recover from a failed model/publication or offline
+    # guard step. A successful inventory with a failed successor is safe to
+    # replace with a new normal pass; no old run or artifact is replayed.
+    if not _safe_finished_job(source, api.jobs(source["id"])):
+        return {"status": "latest_job_not_safe_for_recovery"}
+    # Check even older active runs outside the bounded recent-history page.
+    for state in sorted(ACTIVE):
+        page = api.active_runs(state)
+        if not isinstance(page, dict):
+            raise RecoveryUnavailable("Active run inventory unavailable")
+        total, runs = page.get("total_count"), page.get("workflow_runs")
+        if (type(total) is not int or total < 0 or not isinstance(runs, list)
+                or len(runs) != min(total, 1)):
+            raise RecoveryUnavailable("Active run inventory malformed")
+        if total:
+            return {"status": "automatic_run_active"}
+    final, reason = _stale_candidate(api.recent_runs(), workflow_id, clock())
+    if final is None:
+        return {"status": reason}
+    if not _same_run(source, final):
+        return {"status": "automatic_run_changed"}
+    if _workflow_id(api.workflow()) != workflow_id:
+        return {"status": "automatic_workflow_changed"}
+    # Single new dispatch; an ambiguous result ends this check immediately.
+    api.dispatch()
+    return {"status": "one_fresh_automatic_run_requested",
+            "source_run_id": source["id"], "workflow": WORKFLOW, "ref": "main"}
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stale", action="store_true")
+    args = parser.parse_args(argv)
     try:
-        result = recover()
+        result = recover_stale() if args.stale else recover()
     except RecoveryUnavailable as error:
         print("STARTUP_RECOVERY " + json.dumps({"status": "unavailable", "reason": str(error)}))
         return 1
